@@ -1,0 +1,168 @@
+#!/usr/bin/env -S uv run --script
+#
+# /// script
+# requires-python = ">=3.12"
+# dependencies = ["typer[all]", "rich"]
+# ///
+
+# ABOUTME: CLI interface for agent setup - creates symlinks to AGENT.md files
+# ABOUTME: Lightweight wrapper around agent_setup module
+
+from pathlib import Path
+from typing import List, Optional
+
+import typer
+from rich import print as rprint
+from rich.prompt import Prompt
+
+from agent_setup import (
+    AGENTIC_SYSTEMS,
+    create_symlinks,
+    ensure_templates_exist,
+    generate_local_templates,
+    uninstall_symlinks,
+    validate_source_files,
+    validate_systems,
+)
+from language import (
+    get_available_languages,
+    setup_language_prompts,
+    uninstall_language_prompts,
+    validate_language,
+)
+
+app = typer.Typer(help="Setup AGENT.md symlinks for agentic development systems")
+
+
+@app.command()
+def main(
+    project_path: Optional[str] = typer.Argument(None, help="Path to the target project directory"),
+    system: Optional[List[str]] = typer.Option(None, "--system", "-s", help="Agentic system(s) to use (can specify multiple)"),
+    uninstall: bool = typer.Option(False, "--uninstall", "-u", help="Remove existing symlinks"),
+    regenerate: bool = typer.Option(False, "--regenerate", "-r", help="Regenerate local template files"),
+    add_language: bool = typer.Option(False, "--add-language", "-l", help="Add language-specific prompts to project"),
+    language: Optional[str] = typer.Option(None, "--language", help="Language to add (use with --add-language)"),
+):
+    """Setup AGENT.md symlinks for agentic development systems"""
+
+    # Handle regenerate mode
+    if regenerate:
+        generate_local_templates()
+        return
+
+    # Get project path
+    if not project_path:
+        project_path = Prompt.ask("Enter the target project directory path")
+
+    target_dir = Path(project_path).expanduser().resolve()
+
+    if not target_dir.exists():
+        rprint(f"[red]Error: Directory {target_dir} does not exist[/red]")
+        raise typer.Exit(1)
+
+    if not target_dir.is_dir():
+        rprint(f"[red]Error: {target_dir} is not a directory[/red]")
+        raise typer.Exit(1)
+
+    # Handle language mode
+    if add_language:
+        # Get language if not provided
+        if not language:
+            available = get_available_languages()
+            if not available:
+                rprint("[red]No languages found in lang/ directory[/red]")
+                raise typer.Exit(1)
+            
+            rprint("\n[bold]Available languages:[/bold]")
+            for i, lang in enumerate(available, 1):
+                rprint(f"  {i}. {lang}")
+            
+            choice = Prompt.ask("Select a language (number)")
+            try:
+                idx = int(choice) - 1
+                if 0 <= idx < len(available):
+                    language = available[idx]
+                else:
+                    rprint("[red]Invalid selection[/red]")
+                    raise typer.Exit(1)
+            except ValueError:
+                rprint("[red]Invalid selection[/red]")
+                raise typer.Exit(1)
+        
+        # Validate language
+        if not validate_language(language):
+            rprint(f"[red]Error: Language '{language}' not found[/red]")
+            available = get_available_languages()
+            if available:
+                rprint(f"Available languages: {', '.join(available)}")
+            raise typer.Exit(1)
+        
+        # Setup language prompts
+        try:
+            results = setup_language_prompts(target_dir, language)
+            
+            # Summary
+            if results["language_symlink_created"]:
+                rprint(f"[blue]✨ Language prompts for {language} have been linked[/blue]")
+                
+            rprint(f"\n[green]Language setup complete for {language} in {target_dir}[/green]")
+            
+        except Exception as e:
+            rprint(f"[red]Error setting up language prompts: {e}[/red]")
+            raise typer.Exit(1)
+        
+        return
+
+    # Handle uninstall mode
+    if uninstall:
+        # Remove agent system symlinks
+        single_system = system[0] if system else None
+        uninstall_symlinks(target_dir, single_system)
+        
+        # Also remove language prompts if no specific system was specified
+        if not single_system:
+            uninstall_language_prompts(target_dir)
+        
+        return
+
+    # Get agentic systems
+    if not system:
+        rprint("\n[bold]Available agentic systems:[/bold]")
+        for i, sys_name in enumerate(AGENTIC_SYSTEMS.keys(), 1):
+            rprint(f"  {i}. {sys_name}")
+
+        rprint("\n[bold]Select systems to install (space-separated numbers, e.g., '1 3' for Claude Code and Cursor):[/bold]")
+        choices_input = Prompt.ask("Enter your choices")
+
+        try:
+            selected_indices = [int(x.strip()) for x in choices_input.split()]
+            system_names = list(AGENTIC_SYSTEMS.keys())
+            system = [system_names[i - 1] for i in selected_indices if 1 <= i <= len(system_names)]
+
+            if not system:
+                rprint("[red]No valid systems selected[/red]")
+                raise typer.Exit(1)
+
+        except (ValueError, IndexError):
+            rprint("[red]Invalid selection. Please enter numbers separated by spaces.[/red]")
+            raise typer.Exit(1)
+
+    # Validate inputs
+    try:
+        validate_systems(system)
+        validate_source_files()
+    except (ValueError, FileNotFoundError):
+        raise typer.Exit(1)
+
+    # Ensure templates exist
+    ensure_templates_exist()
+
+    # Create symlinks
+    created_count = create_symlinks(target_dir, system)
+
+    if created_count > 0:
+        rprint(f"\n[blue]Successfully created {created_count} symlink(s)[/blue]")
+
+
+if __name__ == "__main__":
+    app()

@@ -1,0 +1,172 @@
+#!/usr/bin/env python3
+# ABOUTME: Language-specific prompt setup for AI agents
+# ABOUTME: Handles CLAUDE.md creation and language prompt symlinks
+
+from pathlib import Path
+from typing import List, Optional
+import shutil
+
+from rich import print as rprint
+from rich.prompt import Confirm
+
+
+def get_repo_root() -> Path:
+    """Get the path to the repository root"""
+    script_dir = Path(__file__).parent
+    return script_dir.parent
+
+
+def get_available_languages() -> List[str]:
+    """Get list of available languages from the lang directory"""
+    lang_dir = get_repo_root() / "lang"
+    if not lang_dir.exists():
+        return []
+    
+    languages = []
+    for item in lang_dir.iterdir():
+        if item.is_dir() and not item.name.startswith('.'):
+            languages.append(item.name)
+    
+    return sorted(languages)
+
+
+def validate_language(language: str) -> bool:
+    """Validate that the specified language exists"""
+    available = get_available_languages()
+    return language in available
+
+
+def setup_language_prompts(
+    target_dir: Path,
+    language: str
+) -> dict:
+    """
+    Setup language-specific prompts in the target directory
+    
+    Returns dict with status of operations:
+    - prompts_dir_created: bool
+    - language_symlink_created: bool
+    """
+    results = {
+        "prompts_dir_created": False,
+        "language_symlink_created": False
+    }
+    
+    repo_root = get_repo_root()
+    
+    # Step 1: Create prompts directory
+    prompts_dir = target_dir / "prompts"
+    if not prompts_dir.exists():
+        prompts_dir.mkdir(parents=True, exist_ok=True)
+        rprint(f"[green]✅ Created prompts directory at {prompts_dir}[/green]")
+        results["prompts_dir_created"] = True
+    else:
+        rprint(f"[blue]Prompts directory already exists at {prompts_dir}[/blue]")
+    
+    # Step 2: Create symlink to language directory
+    source_lang_dir = repo_root / "lang" / language
+    target_lang_symlink = prompts_dir / language
+    
+    if not source_lang_dir.exists():
+        rprint(f"[red]Error: Language directory not found: {source_lang_dir}[/red]")
+        raise FileNotFoundError(f"Language directory not found: {source_lang_dir}")
+    
+    if target_lang_symlink.exists() or target_lang_symlink.is_symlink():
+        # Check if it's already the correct symlink
+        if target_lang_symlink.is_symlink() and target_lang_symlink.readlink() == source_lang_dir:
+            rprint(f"[yellow]Language symlink for {language} already exists and is correct[/yellow]")
+            return results
+        
+        overwrite = Confirm.ask(f"Symlink {target_lang_symlink} already exists. Overwrite?")
+        if not overwrite:
+            rprint(f"[yellow]Skipped creating language symlink[/yellow]")
+            return results
+        
+        if target_lang_symlink.is_symlink():
+            target_lang_symlink.unlink()
+        else:
+            # It's a real directory/file, be more careful
+            rprint(f"[red]Warning: {target_lang_symlink} is not a symlink[/red]")
+            if not Confirm.ask("This will remove a real file/directory. Continue?"):
+                rprint(f"[yellow]Aborted[/yellow]")
+                return results
+            if target_lang_symlink.is_dir():
+                shutil.rmtree(target_lang_symlink)
+            else:
+                target_lang_symlink.unlink()
+    
+    target_lang_symlink.symlink_to(source_lang_dir)
+    rprint(f"[green]✅ Created symlink: {target_lang_symlink} → {source_lang_dir}[/green]")
+    results["language_symlink_created"] = True
+    
+    return results
+
+
+def uninstall_language_prompts(target_dir: Path, language: Optional[str] = None) -> None:
+    """
+    Remove language prompts setup from target directory
+    
+    If language is specified, only remove that language's symlink.
+    Otherwise, remove the entire prompts directory.
+    """
+    prompts_dir = target_dir / "prompts"
+    
+    if not prompts_dir.exists():
+        rprint(f"[yellow]No prompts directory found at {prompts_dir}[/yellow]")
+        return
+    
+    if language:
+        # Remove specific language symlink
+        lang_symlink = prompts_dir / language
+        if lang_symlink.is_symlink():
+            lang_symlink.unlink()
+            rprint(f"[green]✅ Removed {language} symlink from {prompts_dir}[/green]")
+            
+            # Check if prompts directory is now empty
+            if not any(prompts_dir.iterdir()):
+                prompts_dir.rmdir()
+                rprint(f"[blue]Removed empty prompts directory[/blue]")
+        elif lang_symlink.exists():
+            rprint(f"[yellow]Warning: {lang_symlink} is not a symlink, skipping[/yellow]")
+        else:
+            rprint(f"[yellow]No {language} symlink found in {prompts_dir}[/yellow]")
+    else:
+        # Remove entire prompts directory
+        if Confirm.ask(f"Remove entire prompts directory at {prompts_dir}?"):
+            # Only remove symlinks, warn about real files
+            has_real_files = False
+            for item in prompts_dir.iterdir():
+                if item.is_symlink():
+                    item.unlink()
+                    rprint(f"[green]✅ Removed symlink: {item}[/green]")
+                else:
+                    has_real_files = True
+                    rprint(f"[yellow]Warning: {item} is not a symlink, preserving[/yellow]")
+            
+            if not has_real_files:
+                prompts_dir.rmdir()
+                rprint(f"[green]✅ Removed prompts directory[/green]")
+            else:
+                rprint(f"[yellow]Prompts directory contains non-symlink files, preserved directory[/yellow]")
+
+
+def list_language_setups(target_dir: Path) -> List[str]:
+    """List languages currently set up in the target directory"""
+    prompts_dir = target_dir / "prompts"
+    if not prompts_dir.exists():
+        return []
+    
+    languages = []
+    for item in prompts_dir.iterdir():
+        if item.is_symlink():
+            # Check if it points to our lang directory
+            try:
+                target = item.readlink()
+                repo_root = get_repo_root()
+                lang_dir = repo_root / "lang"
+                if lang_dir in target.parents:
+                    languages.append(item.name)
+            except OSError:
+                pass
+    
+    return sorted(languages)
