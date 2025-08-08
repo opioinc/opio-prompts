@@ -1,205 +1,77 @@
-# FastAPI Testing Guidelines
+# FastAPI Testing Guidelines (2025)
 
 ## Test Structure
-- Organize tests in **`tests/`** directory mirroring source structure
-- Create **`conftest.py`** at tests root for shared fixtures
-- Use **`test_` prefix** for all test files
-- Group tests by **feature/domain** in subdirectories
-- Separate **unit tests** from **integration tests**
-- Create **`fixtures/`** directory for test data files
-- Use **`__init__.py`** files to make test modules importable
-- Implement **end-to-end tests** in `tests/e2e/` directory
-- Keep **test files small** and focused on single functionality
-- Name tests with **descriptive function names** indicating what's being tested
+- Organize tests in `tests/` mirroring source structure; share fixtures in `tests/conftest.py`.
+- Separate unit, integration, and e2e; use markers to filter (`-m "not e2e"`).
+- Keep tests focused and descriptive; one behavior per test.
 
 ## Essential Fixtures
-- Create **async test database** fixture with in-memory SQLite
-- Implement **test client** fixture using httpx.AsyncClient
-- Create **authenticated client** fixture with valid JWT token
-- Define **test user** fixture with known credentials
-- Implement **mock Redis** fixture for caching tests
-- Create **test data factory** fixtures using Factory Boy
-- Define **cleanup fixtures** to reset state between tests
-- Implement **mock email** fixture to capture sent emails
-- Create **mock storage** fixture for file upload tests
-- Define **time control** fixture for testing time-dependent code
+- Async test client based on `httpx.AsyncClient` with ASGI transport and lifespan support.
+- Database fixture yielding an `AsyncSession` bound to a fresh test DB/schema.
+- Authenticated client fixture to exercise protected endpoints.
+- Clock/time control fixture for time-bound logic.
+- Temporary storage/FS fixture for upload/download tests.
 
 ## Pytest Configuration
-- Use **pytest-asyncio** for async test support
-- Configure **pytest-cov** for code coverage reporting
-- Use **pytest-mock** for mocking external dependencies
-- Enable **pytest-env** for test environment variables
-- Configure **pytest-xdist** for parallel test execution
-- Use **pytest-timeout** to prevent hanging tests
-- Enable **pytest-benchmark** for performance testing
-- Configure **markers** for test categorization (slow, integration, unit)
-- Set **minimum coverage** threshold at 80%
-- Use **pytest.ini** or **pyproject.toml** for configuration
+- Use `pytest-anyio` for async tests (preferable to `pytest-asyncio` in AnyIO-based stacks).
+- Enable coverage (`pytest-cov`) and parallelization (`pytest-xdist`) as needed.
+- Configure `pytest.ini`/`pyproject.toml` for markers, test paths, and timeouts.
 
 ## Database Testing
-- Use **in-memory SQLite** for fast unit tests
-- Create **test database** for integration tests
-- Implement **transaction rollback** between tests for isolation
-- Use **factory pattern** for generating test data
-- Test **migrations** with separate test database
-- Verify **cascade deletes** and foreign key constraints
-- Test **concurrent database access** for race conditions
-- Mock **repository methods** for service layer tests
-- Test **database connection** pool exhaustion
-- Verify **optimistic locking** behavior
+- For integration tests, use a containerized Postgres test DB; run Alembic migrations.
+- Rollback/refresh between tests for isolation; avoid sharing state.
+- Use factories/builders for test data; avoid brittle hand-crafted objects.
 
 ## API Testing Patterns
-- Test **all HTTP methods** (GET, POST, PUT, DELETE, PATCH)
-- Verify **correct status codes** for success and error cases
-- Validate **response schemas** match Pydantic models
-- Test **pagination parameters** (skip, limit)
-- Verify **sorting and filtering** functionality
-- Test **invalid input** handling and validation errors
-- Check **authentication requirements** on protected endpoints
-- Test **authorization** for different user roles
-- Verify **CORS headers** in responses
-- Test **rate limiting** behavior
+- Exercise all methods and verify status codes, schemas, and side effects.
+- Validate pagination and filtering; cover invalid input and boundary conditions.
+- Verify CORS headers when applicable; check auth and authorization flows.
 
 ## Authentication Testing
-- Test **login endpoint** with valid and invalid credentials
-- Verify **JWT token generation** and structure
-- Test **token expiration** handling
-- Verify **refresh token** functionality
-- Test **logout/token revocation** if implemented
-- Check **password reset** flow end-to-end
-- Test **account lockout** after failed attempts
-- Verify **OAuth2 flows** if implemented
-- Test **API key authentication** if used
-- Verify **multi-factor authentication** if implemented
+- Test login with valid/invalid credentials; verify token structure and expiry behavior.
+- Verify refresh, logout/rotation, and revoked-token handling where implemented.
+- Cover role/permission matrix on sensitive endpoints.
 
 ## Mocking Strategies
-- Mock **external API calls** with responses fixture
-- Use **monkeypatch** for environment variables
-- Mock **datetime.now()** for time-dependent tests
-- Create **fake implementations** for complex services
-- Mock **file system operations** for upload/download tests
-- Use **dependency override** for FastAPI dependencies
-- Mock **email sending** to capture sent messages
-- Create **test doubles** for database repositories
-- Mock **Redis cache** for caching logic tests
-- Use **spy objects** to verify method calls
+- Mock external HTTP with `respx`/`responses` for httpx.
+- Monkeypatch environment vars; use fakes for disk/email/object storage.
+- Use dependency overrides to inject fakes/mocks for FastAPI dependencies.
 
 ## Test Data Management
-- Use **Factory Boy** for complex test object creation
-- Create **builder pattern** for flexible test data
-- Implement **data fixtures** for common test scenarios
-- Use **Faker** for generating realistic test data
-- Create **seed data** scripts for integration tests
-- Implement **test data cleanup** in teardown
-- Use **parameterized tests** for multiple test cases
-- Create **snapshot tests** for complex response validation
-- Generate **random test data** for property-based testing
-- Maintain **test data versioning** for backwards compatibility
+- Use factories and builders; prefer deterministic data and stable seeds.
+- Snapshot complex responses only for stable contracts and after agreement.
 
 ## Async Testing
-- Use **`@pytest.mark.asyncio`** for async test functions
-- Create **async fixtures** with `async def` syntax
-- Use **`await`** for all async operations in tests
-- Test **concurrent requests** with asyncio.gather()
-- Verify **async context managers** work correctly
-- Test **background tasks** execution
-- Use **async mocks** for async dependencies
-- Test **WebSocket connections** if used
-- Verify **async generators** and streaming responses
-- Test **timeout behavior** for long-running operations
+- Mark async tests with `@pytest.mark.anyio` (or configure globally).
+- Use `asyncio.gather` in tests for concurrency behavior; assert ordering/limits when relevant.
+- Test streaming endpoints and WebSockets when used.
 
-## Integration Testing
-- Test **complete request flow** from router to database
-- Verify **middleware execution** order and behavior
-- Test **dependency injection** chain
-- Verify **transaction boundaries** work correctly
-- Test **error propagation** through layers
-- Verify **caching behavior** with real Redis
-- Test **file upload/download** end-to-end
-- Verify **email sending** with test SMTP server
-- Test **third-party integrations** with sandbox environments
-- Verify **background job** execution
+## Integration & E2E
+- Verify middleware order, dependency chains, transaction boundaries, and caching behavior.
+- Run E2E tests against a realistic environment (compose/k8s namespace) before production deploys.
 
 ## Performance Testing
-- Use **pytest-benchmark** for performance regression testing
-- Test **API response times** under load
-- Verify **database query performance**
-- Test **concurrent user** handling
-- Measure **memory usage** for large operations
-- Test **file upload** performance with large files
-- Verify **pagination performance** with large datasets
-- Test **caching effectiveness** for repeated queries
-- Measure **startup time** for application
-- Profile **hot code paths** with py-spy
+- Use `pytest-benchmark` or `locust`/`k6` for load tests on critical endpoints.
+- Track P99 latency targets and DB query counts in performance tests.
 
 ## Security Testing
-- Test **SQL injection** prevention with malicious inputs
-- Verify **XSS protection** with script injection attempts
-- Test **authentication bypass** attempts
-- Verify **authorization** for all endpoints
-- Test **rate limiting** effectiveness
-- Verify **file upload** restrictions
-- Test **CORS policy** enforcement
-- Check **security headers** presence
-- Test **password strength** validation
-- Verify **token expiration** and refresh
+- Attempt SQLi, XSS payloads on inputs; verify rejection and logging.
+- Test rate limits/abuse protections, password complexity, and header hardening.
 
 ## Error Testing
-- Test **404 responses** for non-existent resources
-- Verify **400 responses** for invalid input
-- Test **401 responses** for unauthenticated requests
-- Verify **403 responses** for unauthorized access
-- Test **409 responses** for conflicts
-- Verify **422 responses** for validation errors
-- Test **500 response** handling and error messages
-- Verify **timeout handling** for slow operations
-- Test **database connection** failure handling
-- Verify **external service** failure handling
+- Validate consistent error envelope and mapping to status codes (400/401/403/404/409/422/429/500).
+- Simulate timeouts and failures of dependencies (DB, cache, HTTP).
 
-## Coverage Requirements
-- Maintain **minimum 80% code coverage**
-- Achieve **100% coverage** for critical paths
-- Exclude **generated code** from coverage
-- Cover **all API endpoints** with tests
-- Test **all Pydantic model** validations
-- Cover **error handling** paths
-- Test **all business logic** functions
-- Verify **all database queries** are tested
-- Cover **edge cases** and boundary conditions
-- Generate **HTML coverage reports** for review
+## Coverage
+- Maintain ≥80% overall coverage; 100% for critical auth, payments, and business invariants.
+- Exclude generated code and migrations.
 
 ## CI/CD Integration
-- Run tests on **every pull request**
-- Fail builds if **coverage drops** below threshold
-- Run **different test suites** in parallel
-- Execute **integration tests** against test database
-- Run **security scans** in CI pipeline
-- Generate **test reports** for review
-- Cache **dependencies** for faster builds
-- Run tests against **multiple Python versions**
-- Execute **end-to-end tests** in staging environment
-- Implement **smoke tests** for production deployments
+- Run unit + integration suites on PRs; gate merges on green and coverage threshold.
+- Produce junit and coverage XML for CI reports; cache deps for speed.
+- Run smoke/E2E in staging with environment-configured endpoints.
 
-## Test Best Practices
-- Keep tests **independent** and isolated
-- Use **descriptive test names** that explain what's being tested
-- Follow **Arrange-Act-Assert** pattern
-- Make tests **deterministic** and reproducible
-- Avoid **testing implementation details**
-- Focus on **behavior** not internal structure
-- Keep tests **fast** by using mocks appropriately
-- Write tests **before fixing bugs** (regression tests)
-- Review **test code** as carefully as production code
-- Document **complex test setups** with comments
-
-## Common Testing Utilities
-- Create **custom assertions** for domain-specific checks
-- Implement **test helpers** for common operations
-- Create **custom markers** for test categorization
-- Build **test client wrappers** for common API calls
-- Implement **database helpers** for test data setup
-- Create **time helpers** for date/time testing
-- Build **file helpers** for upload/download tests
-- Implement **auth helpers** for token generation
-- Create **validation helpers** for schema checking
-- Build **comparison utilities** for complex objects
+## Best Practices
+- Keep tests independent and deterministic; avoid sleep unless testing timing explicitly.
+- Assert on behavior and contracts, not internal implementation details.
+- Add regression tests when fixing bugs.
