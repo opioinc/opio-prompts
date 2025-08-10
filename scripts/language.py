@@ -36,6 +36,87 @@ def validate_language(language: str) -> bool:
     return language in available
 
 
+def get_language_files(language: str) -> List[str]:
+    """Get list of markdown files in the language directory"""
+    lang_dir = get_repo_root() / "lang" / language
+    if not lang_dir.exists():
+        return []
+    
+    files = []
+    for item in lang_dir.iterdir():
+        if item.is_file() and item.suffix == '.md':
+            files.append(item.name)
+    
+    # Sort with core.md first if it exists
+    if 'core.md' in files:
+        files.remove('core.md')
+        files = ['core.md'] + sorted(files)
+    else:
+        files = sorted(files)
+    
+    return files
+
+
+def update_project_md(target_dir: Path, language: str, remove: bool = False) -> bool:
+    """
+    Update project.md file with language links
+    
+    Args:
+        target_dir: The target project directory
+        language: The language name
+        remove: If True, remove the language links; if False, add them
+    
+    Returns:
+        True if the file was modified, False if no changes were needed
+    """
+    project_md = target_dir / "project.md"
+    
+    # Get language files
+    language_files = get_language_files(language)
+    if not language_files:
+        return False
+    
+    # Generate the lines to add/remove
+    language_lines = [f"@prompts/{language}/{file}" for file in language_files]
+    
+    # Read existing content if file exists
+    existing_lines = []
+    if project_md.exists():
+        existing_lines = project_md.read_text().splitlines()
+    
+    if remove:
+        # Remove language lines
+        original_count = len(existing_lines)
+        existing_lines = [line for line in existing_lines if line not in language_lines]
+        
+        if len(existing_lines) == original_count:
+            rprint(f"[yellow]No {language} references found in project.md[/yellow]")
+            return False
+        
+        # Write back the modified content
+        project_md.write_text('\n'.join(existing_lines) + '\n' if existing_lines else '')
+        rprint(f"[green]✅ Removed {language} references from project.md[/green]")
+        return True
+    else:
+        # Add language lines (idempotent - only add if not present)
+        lines_to_add = []
+        for line in language_lines:
+            if line not in existing_lines:
+                lines_to_add.append(line)
+        
+        if not lines_to_add:
+            rprint(f"[yellow]All {language} references already exist in project.md[/yellow]")
+            return False
+        
+        # Append the new lines
+        all_lines = existing_lines + lines_to_add
+        
+        # Create or update the file
+        project_md.write_text('\n'.join(all_lines) + '\n')
+        rprint(f"[green]✅ Added {len(lines_to_add)} {language} reference(s) to project.md[/green]")
+        return True
+
+
 def setup_language_prompts(
     target_dir: Path,
     language: str
@@ -46,10 +127,12 @@ def setup_language_prompts(
     Returns dict with status of operations:
     - prompts_dir_created: bool
     - language_symlink_created: bool
+    - project_md_updated: bool
     """
     results = {
         "prompts_dir_created": False,
-        "language_symlink_created": False
+        "language_symlink_created": False,
+        "project_md_updated": False
     }
     
     repo_root = get_repo_root()
@@ -99,6 +182,10 @@ def setup_language_prompts(
     rprint(f"[green]✅ Created symlink: {target_lang_symlink} → {source_lang_dir}[/green]")
     results["language_symlink_created"] = True
     
+    # Step 3: Update project.md if it exists or create it
+    if update_project_md(target_dir, language, remove=False):
+        results["project_md_updated"] = True
+    
     return results
 
 
@@ -122,6 +209,9 @@ def uninstall_language_prompts(target_dir: Path, language: Optional[str] = None)
             lang_symlink.unlink()
             rprint(f"[green]✅ Removed {language} symlink from {prompts_dir}[/green]")
             
+            # Update project.md to remove references
+            update_project_md(target_dir, language, remove=True)
+            
             # Check if prompts directory is now empty
             if not any(prompts_dir.iterdir()):
                 prompts_dir.rmdir()
@@ -131,23 +221,21 @@ def uninstall_language_prompts(target_dir: Path, language: Optional[str] = None)
         else:
             rprint(f"[yellow]No {language} symlink found in {prompts_dir}[/yellow]")
     else:
-        # Remove entire prompts directory
-        if Confirm.ask(f"Remove entire prompts directory at {prompts_dir}?"):
-            # Only remove symlinks, warn about real files
-            has_real_files = False
-            for item in prompts_dir.iterdir():
-                if item.is_symlink():
-                    item.unlink()
-                    rprint(f"[green]✅ Removed symlink: {item}[/green]")
-                else:
-                    has_real_files = True
-                    rprint(f"[yellow]Warning: {item} is not a symlink, preserving[/yellow]")
-            
-            if not has_real_files:
-                prompts_dir.rmdir()
-                rprint(f"[green]✅ Removed prompts directory[/green]")
-            else:
-                rprint(f"[yellow]Prompts directory contains non-symlink files, preserved directory[/yellow]")
+        # Remove all language symlinks that point to our lang directory
+        repo_root = get_repo_root()
+        lang_dir = repo_root / "lang"
+        
+        for item in prompts_dir.iterdir():
+            if item.is_symlink():
+                try:
+                    target = item.readlink()
+                    if lang_dir in target.parents:
+                        item.unlink()
+                        rprint(f"[green]✅ Removed language symlink: {item}[/green]")
+                        # Update project.md to remove references
+                        update_project_md(target_dir, item.name, remove=True)
+                except OSError:
+                    pass
 
 
 def list_language_setups(target_dir: Path) -> List[str]:

@@ -43,6 +43,9 @@ uv run scripts/setup.py [PROJECT_PATH] [OPTIONS]
 | `--regenerate` | `-r` | Regenerate local template files |
 | `--add-language` | `-l` | Add language-specific prompts to project |
 | `--language <NAME>` | | Language to add (use with --add-language) |
+| `--add-package` | `-p` | Add package prompts to project |
+| `--package <NAME>` | | Package to add (use with --add-package) |
+| `--remove-package` | | Remove package prompts from project |
 
 ### Basic Commands
 
@@ -73,6 +76,22 @@ uv run scripts/setup.py ~/my-project --add-language --language python
 
 # Short flag
 uv run scripts/setup.py ~/my-project -l --language javascript
+```
+
+#### Add Package Prompts
+
+```bash
+# Interactive package selection
+uv run scripts/setup.py ~/my-project --add-package
+
+# Specify package directly
+uv run scripts/setup.py ~/my-project --add-package --package fastapi
+
+# Short flag
+uv run scripts/setup.py ~/my-project -p --package fastapi
+
+# Remove a package
+uv run scripts/setup.py ~/my-project --remove-package --package fastapi
 ```
 
 #### Maintenance Commands
@@ -128,6 +147,27 @@ This creates:
 - `prompts/` directory in your project
 - Symlink to the language folder (e.g., `prompts/python/` → `lang/python/`)
 
+### Package Prompts
+
+Add framework or library-specific prompts to your project:
+
+```bash
+# Interactive - shows available packages and prompts for selection
+uv run scripts/setup.py ~/my-project --add-package
+
+# Direct - add FastAPI prompts
+uv run scripts/setup.py ~/my-project --add-package --package fastapi
+
+# Remove package prompts
+uv run scripts/setup.py ~/my-project --remove-package --package fastapi
+```
+
+This:
+- Creates `prompts/` directory in your project (if not exists)
+- Symlinks the package folder (e.g., `prompts/fastapi/` → `packages/fastapi/`)
+- Updates `project.md` with references to all package files (e.g., `@prompts/fastapi/core.md`)
+- Is idempotent - running multiple times won't duplicate entries
+
 ### Examples
 
 ```bash
@@ -136,6 +176,9 @@ uv run scripts/setup.py ~/my-project -s "Claude Code" -s "Cursor"
 
 # Add Python language prompts to existing project
 uv run scripts/setup.py ~/my-project -l --language python
+
+# Add FastAPI package prompts
+uv run scripts/setup.py ~/my-project -p --package fastapi
 
 # Interactive setup for new project
 uv run scripts/setup.py
@@ -155,5 +198,7 @@ The script creates symlinks from your project directory to this repository's fil
 - Direct symlinks for `.md` files (AGENT.md, CLAUDE.md)
 - Generated templates for special formats (Cursor's `.mdc`)
 - Language prompt directories linked to `lang/` folder
+- Package prompt directories linked to `packages/` folder
+- Automatic updates to `project.md` for package references
 
 Updates to AGENT.md automatically propagate to all linked projects. For systems requiring special formats, use `--regenerate` to update local templates.

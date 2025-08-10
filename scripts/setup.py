@@ -30,6 +30,12 @@ from language import (
     uninstall_language_prompts,
     validate_language,
 )
+from package import (
+    get_available_packages,
+    setup_package_prompts,
+    uninstall_package_prompts,
+    validate_package,
+)
 
 app = typer.Typer(help="Setup AGENT.md symlinks for agentic development systems")
 
@@ -42,6 +48,11 @@ def main(
     regenerate: bool = typer.Option(False, "--regenerate", "-r", help="Regenerate local template files"),
     add_language: bool = typer.Option(False, "--add-language", "-l", help="Add language-specific prompts to project"),
     language: Optional[str] = typer.Option(None, "--language", help="Language to add (use with --add-language)"),
+    uninstall_language: bool = typer.Option(False, "--uninstall-language", help="Remove language prompts from project"),
+    remove_language: bool = typer.Option(False, "--remove-language", help="Remove language prompts from project"),
+    add_package: bool = typer.Option(False, "--add-package", "-p", help="Add package prompts to project"),
+    package: Optional[str] = typer.Option(None, "--package", help="Package to add (use with --add-package)"),
+    remove_package: bool = typer.Option(False, "--remove-package", help="Remove package prompts from project"),
 ):
     """Setup AGENT.md symlinks for agentic development systems"""
 
@@ -104,6 +115,8 @@ def main(
             # Summary
             if results["language_symlink_created"]:
                 rprint(f"[blue]✨ Language prompts for {language} have been linked[/blue]")
+            if results["project_md_updated"]:
+                rprint(f"[blue]✨ project.md has been updated with {language} references[/blue]")
                 
             rprint(f"\n[green]Language setup complete for {language} in {target_dir}[/green]")
             
@@ -111,6 +124,117 @@ def main(
             rprint(f"[red]Error setting up language prompts: {e}[/red]")
             raise typer.Exit(1)
         
+        return
+
+    # Handle remove/uninstall language mode
+    if uninstall_language or remove_language:
+        # Get language if not provided
+        if not language:
+            available = get_available_languages()
+            if not available:
+                rprint("[red]No languages found in lang/ directory[/red]")
+                raise typer.Exit(1)
+            
+            rprint("\n[bold]Available languages:[/bold]")
+            for i, lang in enumerate(available, 1):
+                rprint(f"  {i}. {lang}")
+            
+            choice = Prompt.ask("Select a language to remove (number)")
+            try:
+                idx = int(choice) - 1
+                if 0 <= idx < len(available):
+                    language = available[idx]
+                else:
+                    rprint("[red]Invalid selection[/red]")
+                    raise typer.Exit(1)
+            except ValueError:
+                rprint("[red]Invalid selection[/red]")
+                raise typer.Exit(1)
+        
+        # Remove language prompts
+        uninstall_language_prompts(target_dir, language)
+        rprint(f"[green]Language {language} removed from {target_dir}[/green]")
+        return
+
+    # Handle package mode
+    if add_package:
+        # Get package if not provided
+        if not package:
+            available = get_available_packages()
+            if not available:
+                rprint("[red]No packages found in packages/ directory[/red]")
+                raise typer.Exit(1)
+            
+            rprint("\n[bold]Available packages:[/bold]")
+            for i, pkg in enumerate(available, 1):
+                rprint(f"  {i}. {pkg}")
+            
+            choice = Prompt.ask("Select a package (number)")
+            try:
+                idx = int(choice) - 1
+                if 0 <= idx < len(available):
+                    package = available[idx]
+                else:
+                    rprint("[red]Invalid selection[/red]")
+                    raise typer.Exit(1)
+            except ValueError:
+                rprint("[red]Invalid selection[/red]")
+                raise typer.Exit(1)
+        
+        # Validate package
+        if not validate_package(package):
+            rprint(f"[red]Error: Package '{package}' not found[/red]")
+            available = get_available_packages()
+            if available:
+                rprint(f"Available packages: {', '.join(available)}")
+            raise typer.Exit(1)
+        
+        # Setup package prompts
+        try:
+            results = setup_package_prompts(target_dir, package)
+            
+            # Summary
+            if results["package_symlink_created"]:
+                rprint(f"[blue]✨ Package prompts for {package} have been linked[/blue]")
+            if results["project_md_updated"]:
+                rprint(f"[blue]✨ project.md has been updated with {package} references[/blue]")
+                
+            rprint(f"\n[green]Package setup complete for {package} in {target_dir}[/green]")
+            
+        except Exception as e:
+            rprint(f"[red]Error setting up package prompts: {e}[/red]")
+            raise typer.Exit(1)
+        
+        return
+    
+    # Handle remove package mode
+    if remove_package:
+        # Get package if not provided
+        if not package:
+            available = get_available_packages()
+            if not available:
+                rprint("[red]No packages found in packages/ directory[/red]")
+                raise typer.Exit(1)
+            
+            rprint("\n[bold]Available packages:[/bold]")
+            for i, pkg in enumerate(available, 1):
+                rprint(f"  {i}. {pkg}")
+            
+            choice = Prompt.ask("Select a package to remove (number)")
+            try:
+                idx = int(choice) - 1
+                if 0 <= idx < len(available):
+                    package = available[idx]
+                else:
+                    rprint("[red]Invalid selection[/red]")
+                    raise typer.Exit(1)
+            except ValueError:
+                rprint("[red]Invalid selection[/red]")
+                raise typer.Exit(1)
+        
+        # Remove package prompts
+        uninstall_package_prompts(target_dir, package)
+        rprint(f"[green]Package {package} removed from {target_dir}[/green]")
         return
 
     # Handle uninstall mode
