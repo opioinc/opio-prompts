@@ -8,6 +8,10 @@
 - Prefer **type inference** for local variables where TypeScript can infer correctly
 - Use **discriminated unions** with literal type discriminators for complex state management
 - Apply **const assertions** (`as const`) for literal values that shouldn't change
+- Enable **`verbatimModuleSyntax`: true** to preserve import/export syntax exactly as written and avoid interop pitfalls
+- For libraries, enable **`isolatedDeclarations`: true** (with `declaration` or `composite`) to force explicit exported types and unlock fast `.d.ts` generation
+- Prefer **`moduleDetection`: "force"** so every file is a module; avoid implicit script files
+- Consider **`noUncheckedSideEffectImports`: true** to surface accidental side-effect-only imports (requires TS ≥ 5.9)
 
 ### Code Organization
 - Place **one logical component per file** - avoid mixing unrelated exports
@@ -50,12 +54,16 @@
 - Prefer **generic functions over generic classes** when state isn't needed
 
 ### Module and Import Patterns
-- Use **type-only imports** (`import type`) for types to improve bundling
+- Use **type-only imports** (`import type`) for types to improve bundling and eliminate unintended side effects
 - Enable **`isolatedModules`** for better compatibility with build tools
 - Avoid **circular dependencies** - they cause maintenance nightmares
 - Use **project references** for monorepo structures
 - Configure **path aliases** in tsconfig.json for cleaner imports
 - Enable **`verbatimModuleSyntax`: true** to preserve import/export syntax and ensure correct elision
+- Prefer **explicit file extensions** in ESM when targeting Node (`"module"`: `nodenext`/`node18`) to match Node resolution rules
+- Prefer **named exports**; avoid default exports for libraries (interop, tree-shaking, and API clarity)
+- Prefer **explicit re-exports** over `export *` to keep public APIs intentional and tree-shakable
+- Enforce **consistent type imports/exports** in linting to keep type-only traffic out of runtime bundles
 
 ### Performance Optimization
 - **Interfaces vs type aliases**: use interfaces for object shapes you plan to extend/augment; use type aliases for unions, intersections, conditional/mapped and function types. Performance is comparable in modern TS.
@@ -80,6 +88,7 @@
 - Use **type-safe mocking libraries** that respect interfaces
 - Ensure **test coverage includes edge cases** for type guards
 - Consider **type assertion tests** with tools like `tsd` or `expectTypeOf`
+- For libraries, add **publish-time checks** like `are-the-types-wrong` and `publint` to validate exports/types across environments
 
 ### Configuration Standards
 - Required tsconfig.json settings:
@@ -94,7 +103,7 @@
   - `"verbatimModuleSyntax": true`
   - `"useUnknownInCatchVariables": true`
   - `"noPropertyAccessFromIndexSignature": true`
-  - Prefer `"moduleResolution": "bundler"` for ESM/bundler projects (or `"nodeNext"` for Node ESM)
+  - Prefer `"moduleResolution": "bundler"` for app projects using modern bundlers; use `"node18"/"nodenext"` for Node runtime checks and library builds
 
 ### Code Quality Rules
 - **No implicit any** - all parameters must have types
@@ -103,6 +112,7 @@
 - **No `@ts-ignore`** or `@ts-expect-error` without documented justification
 - **No namespace declarations** - use ES modules instead
 - **Avoid `enum`**; prefer union types with const objects (`as const`). If interop requires runtime enums, prefer string enums. Avoid `const enum` unless you fully control compilation and emit.
+- Keep **type-only imports/exports** type-qualified to prevent side effects in isolated transpilers
 
 ### Documentation Requirements
 - Document **complex type logic** with comments explaining the "why"
@@ -119,6 +129,7 @@
 - Prefer **discriminated unions with exhaustive `switch`** for pattern matching semantics
 - Use the **`satisfies`** operator to validate object literal shapes without widening
 - Use **const type parameters** to preserve literal inference in generic APIs
+- Prefer **standard decorators (TS ≥ 5)** over legacy `experimentalDecorators`; avoid `emitDecoratorMetadata` in libraries
 
 ### Security Considerations
 - **Never trust external data** - validate all inputs at runtime
@@ -133,6 +144,27 @@
 - Configure **watch mode** for development with incremental builds
 - Enable **strict null checks** to catch common runtime errors
 - Use **type checking in CI/CD** pipelines
+
+### Building & Publishing Libraries (2025 baseline)
+- **Default to ESM-only** when possible. Node 18+ and modern bundlers handle ESM natively; interop from CJS is increasingly supported. If you must support both, ship a dual package intentionally (see below).
+- For dual packages, use an **`exports` map** with explicit conditions and type entries:
+  - Provide `"import"` → ESM (`.mjs`) and `"require"` → CJS (`.cjs`/`.js`)
+  - Provide `"types"` under each condition: `d.mts` for ESM and `d.ts` for CJS
+  - Prefer **subpath exports** for multiple entry points (e.g., `"./orders"`)
+- Prefer **named exports** and **explicit re-exports**; avoid `export *` and default exports in libraries
+- tsconfig for libraries (baseline):
+  - `"module": "node18"` (or `"nodenext"`), `"target": "es2020"`
+  - `"verbatimModuleSyntax": true`, `"declaration": true`, `"declarationMap": true`, `"sourceMap": true`
+  - `"isolatedDeclarations": true` (with `"declaration"` or `"composite"`)
+- Ensure **extensionful ESM imports** in emitted code when targeting Node (e.g., `./utils.js`) to satisfy Node resolution
+- If supporting older TS consumers, consider **`typesVersions`** and/or **downleveling `.d.ts`** (e.g., `downlevel-dts`), keeping your main types modern
+- Validate packages before publishing with **arethetypeswrong** and **publint**; add these to release scripts
+- Use a modern, zero-config library bundler when needed (**tsup**, **unbuild**, **tsdown**); do not bundle `.d.ts` manually unless the tool supports it or you provide proper `typesVersions`
+- Prefer **explicit public API surfaces** (index files with named re-exports) to aid tree-shaking and avoid accidental surface area
+
+### Linting (2025)
+- Use **typescript-eslint v8** with flat config. Enable rules like `consistent-type-imports/exports` and disable rules that conflict with Prettier.
+- Treat `no-floating-promises`, `no-misused-promises`, and type safety rules as **errors** in libraries; allow scoped overrides for tests/examples.
 
 ### Key Anti-Patterns to Avoid
 - Using `any` type anywhere in production code
