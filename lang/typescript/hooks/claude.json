@@ -1,0 +1,24 @@
+{
+  "agent": "claude",
+  "language": "typescript",
+  "dependencies": {
+    "commands": ["node"],
+    "optional_commands": ["tsx", "ts-node", "tsc"]
+  },
+  "files": ["typescript-on-save.sh", "typescript-on-save.ts", "typescript-on-save.js"],
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "hooks/claude/typescript-on-save.sh",
+            "blocking": true,
+            "blocking_failure_message": "❌ TypeScript linting/type checking failed! Fix the issues above before continuing."
+          }
+        ]
+      }
+    ]
+  }
+}
