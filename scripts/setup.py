@@ -46,8 +46,9 @@ def main(
     system: Optional[List[str]] = typer.Option(None, "--system", "-s", help="Agentic system(s) to use (can specify multiple)"),
     uninstall: bool = typer.Option(False, "--uninstall", "-u", help="Remove existing symlinks"),
     regenerate: bool = typer.Option(False, "--regenerate", "-r", help="Regenerate local template files"),
-    add_language: bool = typer.Option(False, "--add-language", "-l", help="Add language-specific prompts to project"),
+    add_language: bool = typer.Option(False, "--add-language", "-l", help="Add language-specific prompts to project (includes hooks by default)"),
     language: Optional[str] = typer.Option(None, "--language", help="Language to add (use with --add-language)"),
+    no_hooks: bool = typer.Option(False, "--no-hooks", help="Skip hook installation when adding languages"),
     uninstall_language: bool = typer.Option(False, "--uninstall-language", help="Remove language prompts from project"),
     remove_language: bool = typer.Option(False, "--remove-language", help="Remove language prompts from project"),
     add_package: bool = typer.Option(False, "--add-package", "-p", help="Add package prompts to project"),
@@ -110,13 +111,18 @@ def main(
         
         # Setup language prompts
         try:
-            results = setup_language_prompts(target_dir, language)
+            # Pass the install_hooks parameter (inverted from no_hooks flag)
+            results = setup_language_prompts(target_dir, language, install_hooks=not no_hooks)
             
             # Summary
             if results["language_symlink_created"]:
                 rprint(f"[blue]✨ Language prompts for {language} have been linked[/blue]")
             if results["project_md_updated"]:
                 rprint(f"[blue]✨ project.md has been updated with {language} references[/blue]")
+            if results.get("hooks_installed"):
+                rprint(f"[blue]✨ Hooks have been installed for {language}[/blue]")
+            elif no_hooks:
+                rprint(f"[yellow]Hooks were skipped (--no-hooks flag)[/yellow]")
                 
             rprint(f"\n[green]Language setup complete for {language} in {target_dir}[/green]")
             

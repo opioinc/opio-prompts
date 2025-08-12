@@ -2,6 +2,16 @@
 
 Agent configuration files and setup utilities for agentic development systems.
 
+## Quick Navigation
+
+- [Installation](#installation) - Get started with UV package manager
+- [Feature Support Matrix](#feature-support-matrix) - See what's supported for each AI agent
+- [Command Line Options](#command-line-options) - All available CLI flags
+- [Language Prompts](#language-prompts) - Add language-specific instructions
+- [Hooks](#hooks-code-quality-automation) - Automatic code quality checks
+- [Package Prompts](#package-prompts) - Framework/library specific prompts
+- [Examples](#examples) - Common usage patterns
+
 ## Installation
 
 ### Install UV
@@ -41,8 +51,9 @@ uv run scripts/setup.py [PROJECT_PATH] [OPTIONS]
 | `--system <NAME>` | `-s` | Agentic system(s) to use (can specify multiple) |
 | `--uninstall` | `-u` | Remove existing symlinks |
 | `--regenerate` | `-r` | Regenerate local template files |
-| `--add-language` | `-l` | Add language-specific prompts to project |
+| `--add-language` | `-l` | Add language-specific prompts to project (includes hooks by default) |
 | `--language <NAME>` | | Language to add (use with --add-language) |
+| `--no-hooks` | | Skip hook installation when adding languages |
 | `--add-package` | `-p` | Add package prompts to project |
 | `--package <NAME>` | | Package to add (use with --add-package) |
 | `--remove-package` | | Remove package prompts from project |
@@ -117,6 +128,75 @@ uv run scripts/setup.py ~/my-project -u -s "Cursor"
 - **Cursor** → Creates `.cursor/rules/agent.mdc` (symlink to generated `.mdc` template)
 - **Cline** → Creates `AGENT.md` (symlink to `AGENT.md`)
 
+## Feature Support Matrix
+
+This table shows which features are currently supported for each AI agent system:
+
+| Feature | Claude Code | Cursor | Amp | Cline | Notes |
+|---------|:-----------:|:------:|:---:|:-----:|-------|
+| **Core Prompts** |
+| AGENT.md symlink | ✅ | ✅ | ✅ | ✅ | Base agent configuration |
+| Custom file path | ✅ | ✅ | ❌ | ❌ | Claude: CLAUDE.md, Cursor: .cursor/rules/agent.mdc |
+| Auto-propagate updates | ✅ | ⚠️ | ✅ | ✅ | Cursor requires `--regenerate` for .mdc format |
+| **Language Support** |
+| Language prompts | ✅ | ✅ | ✅ | ✅ | All agents can use language prompts |
+| Python prompts | ✅ | ✅ | ✅ | ✅ | Via @prompts/python/ references |
+| TypeScript prompts | ✅ | ✅ | ✅ | ✅ | Via @prompts/typescript/ references |
+| Rust prompts | ✅ | ✅ | ✅ | ✅ | Via @prompts/rust/ references |
+| **Hooks (Auto Quality Checks)** |
+| Hook support | ✅ | 🚧 | 🚧 | 🚧 | Currently Claude Code only |
+| Python hooks | ✅ | ❌ | ❌ | ❌ | Ruff + Ty type checking |
+| TypeScript hooks | ✅ | ❌ | ❌ | ❌ | TSX/TS-Node linting |
+| Auto-install hooks | ✅ | ❌ | ❌ | ❌ | With --add-language |
+| Settings integration | ✅ | ❌ | ❌ | ❌ | .claude/settings.json |
+| **Package Support** |
+| Package prompts | ✅ | ✅ | ✅ | ✅ | Framework/library specific prompts |
+| FastAPI prompts | ✅ | ✅ | ✅ | ✅ | Via @prompts/fastapi/ |
+| Svelte prompts | ✅ | ✅ | ✅ | ✅ | Via @prompts/svelte/ |
+| project.md updates | ✅ | ✅ | ✅ | ✅ | Auto-adds package references |
+| **Management** |
+| Interactive setup | ✅ | ✅ | ✅ | ✅ | Via setup.py script |
+| Multi-agent install | ✅ | ✅ | ✅ | ✅ | Can install multiple agents at once |
+| Uninstall support | ✅ | ✅ | ✅ | ✅ | Clean removal of symlinks |
+| Selective uninstall | ✅ | ✅ | ✅ | ✅ | Remove specific languages/packages |
+
+### Legend
+
+- ✅ **Fully Supported** - Feature is implemented and working
+- ⚠️ **Partial Support** - Feature works with limitations
+- 🚧 **Planned** - On the roadmap for future implementation
+- ❌ **Not Supported** - Not available for this agent
+- N/A **Not Applicable** - Feature doesn't apply to this agent
+
+### Notes on Hook Support
+
+Currently, hooks are only implemented for **Claude Code**. The architecture supports adding hooks for other agents:
+- **Cursor**: Would use `.cursor/hooks/` directory and cursor-specific settings
+- **Amp**: Would require understanding Amp's extension/hook system
+- **Cline**: Would need integration with Cline's workflow system
+
+To request hook support for additional agents, please open an issue on GitHub.
+
+### Available Languages & Packages
+
+#### Currently Available Languages
+- **Python** - Full support with hooks (ruff, ty)
+- **TypeScript** - Full support with hooks (tsx/ts-node)
+- **Rust** - Prompts only (no hooks yet)
+
+#### Currently Available Packages
+- **FastAPI** - Python web framework prompts
+- **Svelte** - Frontend framework prompts
+
+To see the latest list of available languages and packages, run:
+```bash
+# List available languages
+ls lang/
+
+# List available packages
+ls packages/
+```
+
 ### Interactive Mode
 
 When run without arguments, the script enters interactive mode:
@@ -141,11 +221,70 @@ uv run scripts/setup.py ~/my-project --add-language
 
 # Direct - add Python prompts
 uv run scripts/setup.py ~/my-project --add-language --language python
+
+# Add language without hooks
+uv run scripts/setup.py ~/my-project --add-language --language python --no-hooks
 ```
 
 This creates:
 - `prompts/` directory in your project
 - Symlink to the language folder (e.g., `prompts/python/` → `lang/python/`)
+- **Automatic hook installation** (see Hooks section below)
+
+### Hooks (Code Quality Automation)
+
+When you add a language to your project, **hooks are automatically installed by default** to ensure code quality. These hooks run when you edit files in supported AI agents (like Claude Code).
+
+#### What Hooks Do
+
+Hooks automatically run code quality checks when you save or edit files:
+- **Python**: Runs `ruff` for formatting/linting and `ty` for type checking
+- **TypeScript**: Runs linting and type checking via `tsx`/`ts-node`
+
+#### How Hooks Get Installed
+
+When you run `--add-language`:
+1. Hook scripts are copied to `hooks/claude/` in your project
+2. Claude Code settings are updated in `.claude/settings.json`
+3. Dependencies are verified (e.g., `uv` for Python, `node` for TypeScript)
+
+#### Controlling Hook Installation
+
+```bash
+# Install language WITH hooks (default)
+uv run scripts/setup.py ~/my-project --add-language --language python
+
+# Install language WITHOUT hooks
+uv run scripts/setup.py ~/my-project --add-language --language python --no-hooks
+
+# Remove language and its hooks
+uv run scripts/setup.py ~/my-project --remove-language --language python
+```
+
+#### Project Structure After Hook Installation
+
+```
+your_project/
+├── hooks/
+│   └── claude/              # Claude-specific hooks
+│       ├── python-on-save.py
+│       └── typescript-on-save.sh
+├── .claude/
+│   └── settings.json        # Hook configuration
+└── prompts/                 # Language prompts
+```
+
+#### Dependencies Required
+
+**Python hooks:**
+- `uv` (Python package manager)
+- `loguru` (installed automatically in project)
+
+**TypeScript hooks:**
+- `node`
+- One of: `tsx`, `ts-node`, or `tsc`
+
+If dependencies are missing, the installation will fail with a clear error message.
 
 ### Package Prompts
 
@@ -174,8 +313,11 @@ This:
 # Setup Claude Code and Cursor for a project
 uv run scripts/setup.py ~/my-project -s "Claude Code" -s "Cursor"
 
-# Add Python language prompts to existing project
+# Add Python language prompts to existing project (with hooks)
 uv run scripts/setup.py ~/my-project -l --language python
+
+# Add Python language prompts WITHOUT hooks
+uv run scripts/setup.py ~/my-project -l --language python --no-hooks
 
 # Add FastAPI package prompts
 uv run scripts/setup.py ~/my-project -p --package fastapi

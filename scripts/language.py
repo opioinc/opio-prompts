@@ -122,10 +122,17 @@ def update_project_md(target_dir: Path, language: str, remove: bool = False) -> 
 def setup_language_prompts(
     target_dir: Path,
     language: str,
-    agent: str = "claude"
+    agent: str = "claude",
+    install_hooks: bool = True
 ) -> dict:
     """
     Setup language-specific prompts in the target directory
+    
+    Args:
+        target_dir: The target project directory
+        language: The language name
+        agent: The AI agent type (default: "claude")
+        install_hooks: Whether to install hooks (default: True)
     
     Returns dict with status of operations:
     - prompts_dir_created: bool
@@ -164,7 +171,7 @@ def setup_language_prompts(
         if target_lang_symlink.is_symlink() and target_lang_symlink.readlink() == source_lang_dir:
             rprint(f"[yellow]Language symlink for {language} already exists and is correct[/yellow]")
             # Still try to install hooks even if symlink exists
-            if setup_language_hooks(target_dir, language, agent):
+            if install_hooks and setup_language_hooks(target_dir, language, agent):
                 results["hooks_installed"] = True
             return results
         
@@ -194,9 +201,12 @@ def setup_language_prompts(
     if update_project_md(target_dir, language, remove=False):
         results["project_md_updated"] = True
     
-    # Step 4: Install hooks for the language
-    if setup_language_hooks(target_dir, language, agent):
-        results["hooks_installed"] = True
+    # Step 4: Install hooks for the language (if enabled)
+    if install_hooks:
+        if setup_language_hooks(target_dir, language, agent):
+            results["hooks_installed"] = True
+    else:
+        rprint(f"[blue]Skipping hook installation (disabled)[/blue]")
     
     return results
 
