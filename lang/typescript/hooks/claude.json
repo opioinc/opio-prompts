@@ -13,7 +13,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "hooks/claude/typescript-on-save.sh",
+            "command": "prompts/typescript/hooks/typescript-on-save.sh",
             "blocking": true,
             "blocking_failure_message": "❌ TypeScript linting/type checking failed! Fix the issues above before continuing."
           }

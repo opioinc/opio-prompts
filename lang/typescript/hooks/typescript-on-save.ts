@@ -5,12 +5,9 @@
 import { execSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
-import { fileURLToPath } from 'url';
-import { dirname } from 'path';
 
-// Get __dirname equivalent in ES modules
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+// Use process.cwd() for the script directory since we're running from project root
+const __dirname = path.dirname(process.argv[1] || process.cwd());
 
 // Types for Claude Code hook interface
 interface ClaudeHookInput {
@@ -21,9 +18,9 @@ interface ClaudeHookInput {
   tool_name: string;
   tool_input: {
     file_path?: string;
-    [key: string]: any;
+    [key: string]: unknown;
   };
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 interface HookResponse {
@@ -35,6 +32,12 @@ interface HookResponse {
   decision?: 'block' | 'allow';
   error?: string;
   svelte_check?: {
+    exit_code: number;
+    error_count: number;
+    warning_count: number;
+    output?: string;
+  };
+  eslint?: {
     exit_code: number;
     error_count: number;
     warning_count: number;
@@ -62,8 +65,101 @@ function isTypeScriptOrSvelteFile(filePath: string): boolean {
   return /\.(ts|tsx|js|jsx|svelte)$/.test(filePath);
 }
 
+// Cache for dependency checks (valid for 5 minutes)
+let dependencyCheckCache: { timestamp: number; result: { hasErrors: boolean; message?: string } } | null = null;
+const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+
+function checkDependencies(): { hasErrors: boolean; message?: string } {
+  // Return cached result if still valid
+  if (dependencyCheckCache && (Date.now() - dependencyCheckCache.timestamp) < CACHE_DURATION) {
+    log('DEBUG', 'Using cached dependency check result');
+    return dependencyCheckCache.result;
+  }
+  
+  // Check if pnpm is installed
+  try {
+    execSync('which pnpm', { stdio: 'ignore' });
+  } catch {
+    const result = {
+      hasErrors: true,
+      message: `
+❌ pnpm is not installed!
+
+To install pnpm, run one of the following:
+  • npm install -g pnpm
+  • curl -fsSL https://get.pnpm.io/install.sh | sh -
+  • brew install pnpm (on macOS)
+
+For more installation options, visit: https://pnpm.io/installation
+`
+    };
+    dependencyCheckCache = { timestamp: Date.now(), result };
+    return result;
+  }
+
+  // Check if svelte-check is installed
+  try {
+    execSync('pnpm list svelte-check --depth=0', { stdio: 'ignore', cwd: process.cwd() });
+  } catch {
+    const result = {
+      hasErrors: true,
+      message: `
+❌ svelte-check is not installed in this project!
+
+To install the required dependencies, run:
+  pnpm install
+
+Or specifically install svelte-check:
+  pnpm add -D svelte-check
+
+Make sure you're in the project root directory when running these commands.
+`
+    };
+    dependencyCheckCache = { timestamp: Date.now(), result };
+    return result;
+  }
+
+  // Check if eslint is installed
+  try {
+    execSync('pnpm list eslint --depth=0', { stdio: 'ignore', cwd: process.cwd() });
+  } catch {
+    const result = {
+      hasErrors: true,
+      message: `
+❌ eslint is not installed in this project!
+
+To install the required dependencies, run:
+  pnpm install
+
+Or specifically install eslint:
+  pnpm add -D eslint
+
+Make sure you're in the project root directory when running these commands.
+`
+    };
+    dependencyCheckCache = { timestamp: Date.now(), result };
+    return result;
+  }
+
+  const result = { hasErrors: false };
+  // Cache the successful result
+  dependencyCheckCache = { timestamp: Date.now(), result };
+  return result;
+}
+
 function processTarget(target: string): HookResponse {
   log('INFO', `Processing target: ${target}`);
+  
+  // Check dependencies first
+  const depCheck = checkDependencies();
+  if (depCheck.hasErrors) {
+    console.error(depCheck.message);
+    return {
+      target,
+      success: false,
+      error: 'Missing required dependencies. See error message above.'
+    };
+  }
   
   // Check if it's a TypeScript/Svelte file (for single file mode)
   if (fs.existsSync(target) && fs.statSync(target).isFile()) {
@@ -86,81 +182,177 @@ function processTarget(target: string): HookResponse {
     }
   }
   
-  log('INFO', `Running pnpm check for: ${target}`);
+  log('INFO', `Running type and lint checks for: ${target}`);
   
-  // Run svelte-check with machine output for parsing
-  let machineOutput = '';
-  let humanOutput = '';
-  let exitCode = 0;
+  // Determine if we're checking a single file or the whole project
+  const isSingleFile = fs.existsSync(target) && fs.statSync(target).isFile();
+  
+  // Run TypeScript checking
+  let svelteCheckOutput = '';
+  let svelteCheckExitCode = 0;
   
   try {
-    machineOutput = execSync('npx svelte-check --output machine --tsconfig ./tsconfig.json', {
-      encoding: 'utf8',
-      stdio: ['pipe', 'pipe', 'pipe']
-    });
-  } catch (error: any) {
-    exitCode = error.status || 1;
-    machineOutput = error.stdout || '';
+    if (isSingleFile && target.endsWith('.ts')) {
+      // For single TypeScript files, use tsc directly (much faster)
+      log('DEBUG', 'Using tsc for single TypeScript file');
+      svelteCheckOutput = execSync(`pnpm exec tsc --noEmit --skipLibCheck "${target}"`, {
+        encoding: 'utf8',
+        stdio: ['pipe', 'pipe', 'pipe']
+      });
+    } else if (isSingleFile && target.endsWith('.svelte')) {
+      // For single Svelte files, use svelte-check with file filter (faster than full check)
+      log('DEBUG', 'Using svelte-check for single Svelte file');
+      svelteCheckOutput = execSync(`pnpm exec svelte-check --output human-verbose --tsconfig ./tsconfig.json --threshold error --fail-on-warnings false`, {
+        encoding: 'utf8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+        cwd: path.dirname(target)
+      });
+    } else {
+      // For directories or multiple files, run full svelte-check
+      log('DEBUG', 'Using svelte-check for full project check');
+      svelteCheckOutput = execSync('pnpm exec svelte-check --output human-verbose --tsconfig ./tsconfig.json', {
+        encoding: 'utf8',
+        stdio: ['pipe', 'pipe', 'pipe']
+      });
+    }
+  } catch (error) {
+    const err = error as NodeJS.ErrnoException & { status?: number; stdout?: string; stderr?: string };
+    svelteCheckExitCode = err.status || 1;
+    svelteCheckOutput = err.stdout || '';
+    
+    // If the command failed completely (not just type errors), check why
+    if (!svelteCheckOutput && err.stderr) {
+      const stderr = err.stderr.toString();
+      if (stderr.includes('command not found') || stderr.includes('not recognized')) {
+        console.error(`
+❌ Failed to run svelte-check!
+
+This usually means the dependencies aren't properly installed.
+Try running: pnpm install
+
+Error details: ${stderr}
+`);
+        return {
+          target,
+          success: false,
+          error: 'Failed to run svelte-check. Dependencies may be missing.'
+        };
+      }
+    }
   }
   
-  // Also get human-readable output for error messages
-  try {
-    humanOutput = execSync('npx svelte-check --output human-verbose --tsconfig ./tsconfig.json', {
-      encoding: 'utf8',
-      stdio: ['pipe', 'pipe', 'pipe']
-    });
-  } catch (error: any) {
-    humanOutput = error.stdout || '';
+  log('DEBUG', `svelte-check exit code: ${svelteCheckExitCode}`);
+  
+  // Count type errors and warnings from svelte-check output
+  const typeErrorCount = (svelteCheckOutput.match(/Error:/g) || []).length;
+  const typeWarningCount = (svelteCheckOutput.match(/Warning:/g) || []).length;
+  
+  // Run ESLint for linting checks (only if it's a TS/JS/Svelte file)
+  let eslintOutput = '';
+  let eslintExitCode = 0;
+  let eslintErrorCount = 0;
+  let eslintWarningCount = 0;
+  
+  if (fs.existsSync(target) && fs.statSync(target).isFile() && isTypeScriptOrSvelteFile(target)) {
+    try {
+      // Run ESLint on the specific file with caching for speed
+      eslintOutput = execSync(`pnpm exec eslint --cache --cache-location .eslintcache "${target}"`, {
+        encoding: 'utf8',
+        stdio: ['pipe', 'pipe', 'pipe']
+      });
+    } catch (error) {
+      const err = error as NodeJS.ErrnoException & { status?: number; stdout?: string };
+      eslintExitCode = err.status || 1;
+      eslintOutput = err.stdout || '';
+      
+      // Parse ESLint output for error/warning counts
+      const eslintLines = eslintOutput.split('\n');
+      const summaryLine = eslintLines.find(line => line.includes('problem'));
+      if (summaryLine) {
+        const match = summaryLine.match(/✖\s+(\d+)\s+problems?\s+\((\d+)\s+errors?,\s+(\d+)\s+warnings?\)/);
+        if (match) {
+          eslintErrorCount = parseInt(match[2], 10);
+          eslintWarningCount = parseInt(match[3], 10);
+        }
+      }
+    }
+    
+    log('DEBUG', `eslint exit code: ${eslintExitCode}`);
+    log('INFO', `ESLint found ${eslintErrorCount} errors and ${eslintWarningCount} warnings`);
+  } else {
+    log('INFO', `Skipping ESLint for ${target} (not a single file or not a JS/TS/Svelte file)`);
   }
   
-  log('DEBUG', `pnpm check exit code: ${exitCode}`);
+  // Combine results
+  const totalErrorCount = typeErrorCount + eslintErrorCount;
+  const totalWarningCount = typeWarningCount + eslintWarningCount;
   
-  // Count errors and warnings from machine output
-  const errorCount = (machineOutput.match(/ ERROR /g) || []).length;
-  const warningCount = (machineOutput.match(/ WARNING /g) || []).length;
+  log('INFO', `Total: ${totalErrorCount} errors and ${totalWarningCount} warnings`);
   
-  log('INFO', `Type checking found ${errorCount} errors and ${warningCount} warnings`);
-  
-  if (exitCode === 0) {
+  if (svelteCheckExitCode === 0 && eslintExitCode === 0) {
     log('SUCCESS', `✅ All checks passed for ${target}`);
     return {
       target,
       success: true,
       svelte_check: {
-        exit_code: exitCode,
-        error_count: errorCount,
-        warning_count: warningCount
+        exit_code: svelteCheckExitCode,
+        error_count: typeErrorCount,
+        warning_count: typeWarningCount
+      },
+      eslint: {
+        exit_code: eslintExitCode,
+        error_count: eslintErrorCount,
+        warning_count: eslintWarningCount
       }
     };
   } else {
-    log('WARNING', `⚠️ Type checking failed for ${target}`);
+    log('WARNING', `⚠️ Checks failed for ${target}`);
     
-    // Extract error lines from human-readable output
-    const errorLines = humanOutput.split('\n')
-      .map((line, index, arr) => {
-        if (line.startsWith('Error:')) {
-          // Get context: 1 line before and 2 lines after
-          const context = [];
-          if (index > 0) context.push(arr[index - 1]);
-          context.push(line);
-          if (index < arr.length - 1) context.push(arr[index + 1]);
-          if (index < arr.length - 2) context.push(arr[index + 2]);
-          return context.join('\\n');
-        }
-        return null;
-      })
-      .filter(Boolean)
-      .slice(0, 10)
-      .join('\\n--\\n');
+    // Process TypeScript errors if any
+    let typeErrorLines = '';
+    if (typeErrorCount > 0) {
+      typeErrorLines = svelteCheckOutput.split('\n')
+        .map((line, index, arr) => {
+          if (line.startsWith('Error:')) {
+            // Get context: 1 line before and 2 lines after
+            const context = [];
+            if (index > 0) context.push(arr[index - 1]);
+            context.push(line);
+            if (index < arr.length - 1) context.push(arr[index + 1]);
+            if (index < arr.length - 2) context.push(arr[index + 2]);
+            return context.join('\n');
+          }
+          return null;
+        })
+        .filter(Boolean)
+        .slice(0, 5)
+        .join('\n--\n');
+    }
+    
+    // Process ESLint errors if any
+    let eslintLines = '';
+    if (eslintErrorCount > 0) {
+      // Clean up ESLint output to show just the errors
+      eslintLines = eslintOutput.split('\n')
+        .filter(line => line.trim() && !line.startsWith('✖'))
+        .slice(0, 10)
+        .join('\n');
+    }
     
     return {
       target,
       success: false,
       svelte_check: {
-        exit_code: exitCode,
-        error_count: errorCount,
-        warning_count: warningCount,
-        output: errorLines
+        exit_code: svelteCheckExitCode,
+        error_count: typeErrorCount,
+        warning_count: typeWarningCount,
+        output: typeErrorCount > 0 ? typeErrorLines : undefined
+      },
+      eslint: {
+        exit_code: eslintExitCode,
+        error_count: eslintErrorCount,
+        warning_count: eslintWarningCount,
+        output: eslintErrorCount > 0 ? eslintLines : undefined
       }
     };
   }
@@ -241,20 +433,38 @@ function handleHookMode(): void {
         
         // Check if we should block due to errors
         if (result.success === false) {
-          log('ERROR', 'Blocking due to type checking errors');
+          log('ERROR', 'Blocking due to checking errors');
           
-          const errorCount = result.svelte_check?.error_count || 0;
-          const errorOutput = result.svelte_check?.output || '';
+          const typeErrorCount = result.svelte_check?.error_count || 0;
+          const eslintErrorCount = result.eslint?.error_count || 0;
+          const totalErrors = typeErrorCount + eslintErrorCount;
+          
+          let errorMessage = 'The file has errors that must be fixed before continuing.\nPlease fix ALL the following issues:\n\n';
+          
+          if (typeErrorCount > 0) {
+            const typeErrors = result.svelte_check?.output || '';
+            errorMessage += `TypeScript Errors (${typeErrorCount}):\n${typeErrors}\n\n`;
+          }
+          
+          if (eslintErrorCount > 0) {
+            const eslintErrors = result.eslint?.output || '';
+            errorMessage += `ESLint Errors (${eslintErrorCount}):\n${eslintErrors}\n\n`;
+          }
+          
+          if (totalErrors === 0 && result.error) {
+            // If there are no specific errors but the result failed, show the general error
+            errorMessage = result.error;
+          }
           
           const blockingResponse: HookResponse = {
             decision: 'block',
-            reason: `The file has type checking errors that must be fixed before continuing.\nPlease fix ALL the following issues (even if they existed before your changes):\n\nType checking found ${errorCount} errors:\n${errorOutput}\n\nFix these issues and try again.`
+            reason: errorMessage + '\nFix these issues and try again.'
           };
           
           console.log(JSON.stringify(blockingResponse));
           
           // Also write errors to stderr for visibility
-          console.error(`Type checking failed with ${errorCount} errors`);
+          console.error(`Checks failed with ${totalErrors} total errors`);
           
           // Exit with code 2 to ensure Claude sees the errors
           process.exit(2);

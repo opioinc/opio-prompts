@@ -531,7 +531,19 @@ def setup_language_hooks(target_dir: Path, language: str, agent: str = "claude")
         rprint(f"[red]Error: Missing dependencies for {language} hooks:[/red]")
         for dep in missing:
             rprint(f"[red]  - {dep}[/red]")
-        rprint(f"[yellow]Please install missing dependencies before continuing[/yellow]")
+        
+        # Provide specific installation instructions based on language
+        if language == "typescript":
+            rprint(f"[yellow]To fix this, run one of the following commands in your project:[/yellow]")
+            rprint(f"[cyan]  npm install -g tsx         # Recommended: Fast TypeScript execution[/cyan]")
+            rprint(f"[cyan]  npm install -g ts-node     # Alternative: TypeScript Node.js[/cyan]")
+            rprint(f"[cyan]  npm install -g typescript  # Minimum: TypeScript compiler (tsc)[/cyan]")
+            rprint(f"[dim]  Or install locally: npm install --save-dev tsx[/dim]")
+        elif language == "python":
+            rprint(f"[yellow]To fix this, install the following:[/yellow]")
+            rprint(f"[cyan]  curl -LsSf https://astral.sh/uv/install.sh | sh  # Install uv package manager[/cyan]")
+        else:
+            rprint(f"[yellow]Please install missing dependencies before continuing[/yellow]")
         return False
     
     # Copy hook files
