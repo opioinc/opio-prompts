@@ -1,10 +1,20 @@
 #!/usr/bin/env python3
-# ABOUTME: Python hook for Claude Code that runs ruff format, check, and ty type checking on saved Python files
-# ABOUTME: Logs all operations to hooks/logs with timestamps and structured output using loguru
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#     "loguru",
+#     "ruff",
+#     "ty",
+# ]
+# ///
+# ABOUTME: Python hook for Claude Code that runs ruff format, check, and type checking on saved Python files
+# ABOUTME: Supports both UV and Poetry projects with automatic detection and appropriate tool execution
 
 import json
+import os
 import subprocess
 import sys
+from abc import ABC, abstractmethod
 from pathlib import Path
 from datetime import datetime
 from typing import Any
@@ -17,6 +27,11 @@ log_dir.mkdir(exist_ok=True)
 
 # Configure loguru to log to file with rotation
 log_file = log_dir / f"python-on-save-{datetime.now():%Y-%m-%d}.log"
+# Remove default handlers to avoid duplicate logs
+try:
+    logger.remove()
+except Exception:
+    pass
 logger.add(
     log_file,
     rotation="1 day",
@@ -25,6 +40,234 @@ logger.add(
     level="DEBUG",
     enqueue=True,  # Thread-safe logging
 )
+# Optional: console sink for interactive runs
+logger.add(sys.stderr, format="<green>{time:HH:mm:ss}</green> | {level: <8} | {message}", level="INFO")
+
+
+class PackageManager(ABC):
+    """Abstract base class for package manager operations."""
+
+    @abstractmethod
+    def get_run_prefix(self) -> list[str]:
+        """Return command prefix for running tools."""
+        pass
+
+    @abstractmethod
+    def has_type_checker(self) -> bool:
+        """Check if type checker is available."""
+        pass
+
+    @abstractmethod
+    def get_type_check_command(self, file_path: str) -> list[str]:
+        """Return type checking command."""
+        pass
+
+    @abstractmethod
+    def parse_type_check_output(self, stdout: str, stderr: str, exit_code: int) -> dict[str, Any]:
+        """Parse type checker output into standardized format."""
+        pass
+
+
+class UVManager(PackageManager):
+    """Package manager for UV projects."""
+
+    def get_run_prefix(self) -> list[str]:
+        return ["uv", "run"]
+
+    def has_type_checker(self) -> bool:
+        # Check if ty is available in uv environment
+        return check_command_exists(["uv", "run", "ty", "--version"])
+
+    def get_type_check_command(self, file_path: str) -> list[str]:
+        return ["uv", "run", "ty", "check", "--output-format", "concise", file_path]
+
+    def parse_type_check_output(self, stdout: str, stderr: str, exit_code: int) -> dict[str, Any]:
+        # Parse ty output to count errors
+        error_count = stdout.count("error[") if stdout else 0
+        return {
+            "exit_code": exit_code,
+            "error_count": error_count,
+            "output": stdout.strip(),
+        }
+
+
+class PoetryManager(PackageManager):
+    """Package manager for Poetry projects."""
+
+    def get_run_prefix(self) -> list[str]:
+        return ["poetry", "run"]
+
+    def has_type_checker(self) -> bool:
+        # Check for ty first (newest/preferred)
+        if check_command_exists(["poetry", "run", "ty", "--version"]):
+            return True
+        # Check for mypy
+        if check_command_exists(["poetry", "run", "mypy", "--version"]):
+            return True
+        # Check for pyright
+        if check_command_exists(["poetry", "run", "pyright", "--version"]):
+            return True
+        return False
+
+    def get_type_check_command(self, file_path: str) -> list[str]:
+        # Prefer ty if available
+        if check_command_exists(["poetry", "run", "ty", "--version"]):
+            return ["poetry", "run", "ty", "check", "--output-format", "concise", file_path]
+        # Fall back to mypy
+        if check_command_exists(["poetry", "run", "mypy", "--version"]):
+            return ["poetry", "run", "mypy", "--no-error-summary", "--no-color-output", file_path]
+        # Fall back to pyright
+        if check_command_exists(["poetry", "run", "pyright", "--version"]):
+            return ["poetry", "run", "pyright", file_path]
+        return []
+
+    def parse_type_check_output(self, stdout: str, stderr: str, exit_code: int) -> dict[str, Any]:
+        # Parse ty/mypy/pyright output
+        error_count = 0
+
+        # For ty, count lines with "error["
+        if "error[" in stdout:
+            error_count = stdout.count("error[")
+        # For mypy, count lines with ": error:"
+        elif ": error:" in stdout:
+            error_count = stdout.count(": error:")
+        # For pyright, look for "X errors" in output
+        elif "error" in stdout.lower():
+            import re
+
+            match = re.search(r"(\d+)\s+error", stdout)
+            if match:
+                error_count = int(match.group(1))
+
+        return {
+            "exit_code": exit_code,
+            "error_count": error_count,
+            "output": stdout.strip(),
+        }
+
+
+class DirectManager(PackageManager):
+    """Direct execution without package manager."""
+
+    def get_run_prefix(self) -> list[str]:
+        return []
+
+    def has_type_checker(self) -> bool:
+        # Check if mypy is directly available
+        return check_command_exists(["mypy", "--version"])
+
+    def get_type_check_command(self, file_path: str) -> list[str]:
+        if check_command_exists(["mypy", "--version"]):
+            return ["mypy", "--no-error-summary", "--no-color-output", file_path]
+        return []
+
+    def parse_type_check_output(self, stdout: str, stderr: str, exit_code: int) -> dict[str, Any]:
+        # Parse mypy output
+        error_count = stdout.count(": error:") if stdout else 0
+        return {
+            "exit_code": exit_code,
+            "error_count": error_count,
+            "output": stdout.strip(),
+        }
+
+
+def check_command_exists(cmd: list[str]) -> bool:
+    """Check if a command exists and is executable."""
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            timeout=5,
+        )
+        return result.returncode == 0
+    except (subprocess.SubprocessError, FileNotFoundError, OSError):
+        return False
+
+
+def detect_package_manager() -> PackageManager:
+    """Detect which package manager is being used in the current project."""
+    # Allow override via environment variable
+    pm_override = os.environ.get("PYTHON_HOOK_PACKAGE_MANAGER", "").lower()
+    if pm_override == "uv":
+        logger.info("Using UV package manager (from environment)")
+        return UVManager()
+    elif pm_override == "poetry":
+        logger.info("Using Poetry package manager (from environment)")
+        return PoetryManager()
+    elif pm_override == "direct":
+        logger.info("Using direct execution (from environment)")
+        return DirectManager()
+
+    # Auto-detect based on files
+    cwd = Path.cwd()
+
+    # Priority 1: Check for Poetry (poetry.lock is most definitive)
+    if (cwd / "poetry.lock").exists():
+        logger.info("Detected Poetry project (poetry.lock found)")
+        return PoetryManager()
+
+    # Priority 2: Check for UV (uv.lock is most definitive)
+    if (cwd / "uv.lock").exists():
+        logger.info("Detected UV project (uv.lock found)")
+        return UVManager()
+
+    # Priority 3: Check pyproject.toml for tool configuration
+    pyproject_path = cwd / "pyproject.toml"
+    if pyproject_path.exists():
+        try:
+            with open(pyproject_path) as f:
+                content = f.read()
+                # Check for Poetry first (more specific)
+                if "[tool.poetry]" in content:
+                    logger.info("Detected Poetry project (pyproject.toml has [tool.poetry])")
+                    return PoetryManager()
+                # Then check for UV-style project
+                elif "[project]" in content:
+                    # Additional check: if poetry.lock doesn't exist but [project] exists,
+                    # it could still be a Poetry project without lock file
+                    # Check for specific UV indicators
+                    if "[tool.uv]" in content or "uv.workspace" in content:
+                        logger.info("Detected UV project (pyproject.toml has UV configuration)")
+                        return UVManager()
+                    # If [project] exists without UV indicators, check if Poetry is installed
+                    elif check_command_exists(["poetry", "--version"]):
+                        # Try to detect if this is managed by Poetry
+                        try:
+                            # Run poetry check to see if it recognizes the project
+                            result = subprocess.run(
+                                ["poetry", "check"],
+                                capture_output=True,
+                                timeout=5,
+                                cwd=cwd,
+                            )
+                            if result.returncode == 0:
+                                logger.info("Detected Poetry project (poetry check succeeded)")
+                                return PoetryManager()
+                        except (subprocess.SubprocessError, FileNotFoundError, OSError):
+                            pass
+                    # Default to UV for [project] without other indicators
+                    logger.info("Detected UV project (pyproject.toml has [project])")
+                    return UVManager()
+        except Exception as e:
+            logger.warning(f"Error reading pyproject.toml: {e}")
+
+    # Priority 4: Try to detect based on available commands
+    # Check Poetry first since it's more established
+    if check_command_exists(["poetry", "--version"]):
+        # Additional check: see if we're in a Poetry virtual environment
+        if os.environ.get("POETRY_ACTIVE") == "1" or "poetry" in os.environ.get("VIRTUAL_ENV", ""):
+            logger.info("Detected active Poetry environment")
+            return PoetryManager()
+        logger.info("Detected Poetry installation, using Poetry")
+        return PoetryManager()
+
+    if check_command_exists(["uv", "--version"]):
+        logger.info("Detected UV installation, using UV")
+        return UVManager()
+
+    # Default to direct execution
+    logger.warning("No package manager detected, using direct execution")
+    return DirectManager()
 
 
 def run_command(cmd: list[str], check: bool = False) -> tuple[int, str, str]:
@@ -45,8 +288,8 @@ def run_command(cmd: list[str], check: bool = False) -> tuple[int, str, str]:
         return 1, "", str(e)
 
 
-def process_file(file_path: str) -> dict[str, Any]:
-    """Process a Python file with ruff and ty."""
+def process_file(file_path: str, pm: PackageManager) -> dict[str, Any]:
+    """Process a Python file with ruff and type checking using the appropriate package manager."""
     path = Path(file_path)
 
     # Check if it's a Python file
@@ -61,9 +304,13 @@ def process_file(file_path: str) -> dict[str, Any]:
     logger.info(f"Processing Python file: {file_path}")
     results = {"target": file_path}
 
+    # Get command prefix
+    run_prefix = pm.get_run_prefix()
+
     # Run ruff format
     logger.debug("Running ruff format...")
-    exit_code, stdout, stderr = run_command(["uv", "run", "ruff", "format", file_path])
+    cmd = run_prefix + ["ruff", "format", file_path]
+    exit_code, stdout, stderr = run_command(cmd)
     if exit_code != 0:
         logger.warning(f"Ruff format failed with exit code {exit_code}: {stderr}")
     else:
@@ -71,9 +318,8 @@ def process_file(file_path: str) -> dict[str, Any]:
 
     # Run ruff check with autofix and JSON output
     logger.debug("Running ruff check with autofix...")
-    exit_code, stdout, stderr = run_command(
-        ["uv", "run", "ruff", "check", "--fix", "--output-format", "json", file_path]
-    )
+    cmd = run_prefix + ["ruff", "check", "--fix", "--output-format", "json", file_path]
+    exit_code, stdout, stderr = run_command(cmd)
 
     try:
         ruff_fix_results = json.loads(stdout) if stdout else []
@@ -84,36 +330,37 @@ def process_file(file_path: str) -> dict[str, Any]:
     results["ruff_fix"] = ruff_fix_results
     logger.info(f"Ruff autofix found {len(ruff_fix_results)} issues")
 
-    # Run ty type checking
-    logger.debug("Running ty type checking...")
-    exit_code, stdout, stderr = run_command(
-        ["uv", "run", "ty", "check", "--output-format", "concise", file_path]
-    )
+    # Run type checking (if available)
+    if pm.has_type_checker():
+        logger.debug("Running type checking...")
+        type_check_cmd = pm.get_type_check_command(file_path)
+        if type_check_cmd:
+            exit_code, stdout, stderr = run_command(type_check_cmd)
+            ty_results = pm.parse_type_check_output(stdout, stderr, exit_code)
+        else:
+            logger.warning("Type checker command not available")
+            ty_results = {"exit_code": 0, "error_count": 0, "output": ""}
+    else:
+        logger.info("No type checker available, skipping type checking")
+        ty_results = {"exit_code": 0, "error_count": 0, "output": "", "skipped": True}
 
-    # Parse ty output to count errors
-    error_count = stdout.count("error[") if stdout else 0
-
-    ty_results = {
-        "exit_code": exit_code,
-        "error_count": error_count,
-        "output": stdout.strip(),
-    }
     results["ty"] = ty_results
 
-    if exit_code == 0:
+    if ty_results.get("skipped"):
+        logger.info("Type checking skipped")
+    elif ty_results["exit_code"] == 0:
         logger.info("Type checking passed")
     else:
-        logger.warning(f"Type checking found {error_count} errors")
-        if stdout:
-            for line in stdout.split("\n"):
-                if "error[" in line:
+        logger.warning(f"Type checking found {ty_results['error_count']} errors")
+        if ty_results["output"]:
+            for line in ty_results["output"].split("\n")[:10]:  # Show first 10 lines
+                if line.strip():
                     logger.warning(f"  {line.strip()}")
 
     # Run final ruff check to see remaining issues
     logger.debug("Running final ruff check...")
-    exit_code, stdout, stderr = run_command(
-        ["uv", "run", "ruff", "check", "--output-format", "json", file_path]
-    )
+    cmd = run_prefix + ["ruff", "check", "--output-format", "json", file_path]
+    exit_code, stdout, stderr = run_command(cmd)
 
     try:
         ruff_final_results = json.loads(stdout) if stdout else []
@@ -124,9 +371,7 @@ def process_file(file_path: str) -> dict[str, Any]:
     results["ruff_final"] = ruff_final_results
 
     if ruff_final_results:
-        logger.warning(
-            f"Final ruff check found {len(ruff_final_results)} remaining issues"
-        )
+        logger.warning(f"Final ruff check found {len(ruff_final_results)} remaining issues")
         for issue in ruff_final_results[:5]:  # Log first 5 issues
             logger.warning(
                 f"  {issue.get('filename', '')}:{issue.get('location', {}).get('row', '')} - {issue.get('message', '')}"
@@ -135,7 +380,9 @@ def process_file(file_path: str) -> dict[str, Any]:
         logger.info("Final ruff check passed")
 
     # Overall success determination
-    success = ty_results["exit_code"] == 0 and len(ruff_final_results) == 0
+    # Consider type checking optional if it's skipped
+    type_check_success = ty_results.get("skipped", False) or ty_results["exit_code"] == 0
+    success = type_check_success and len(ruff_final_results) == 0
     results["success"] = success
 
     if success:
@@ -151,6 +398,9 @@ def main():
     logger.info("=" * 60)
     logger.info("Python-on-save hook started")
 
+    # Detect package manager once
+    pm = detect_package_manager()
+
     # Check if we have command line arguments (CLI mode)
     if len(sys.argv) > 1:
         # CLI mode - process command line arguments
@@ -158,21 +408,19 @@ def main():
         targets = sys.argv[1:]
 
         for target in targets:
-            results = process_file(target)
+            results = process_file(target, pm)
             print(json.dumps(results, indent=2))
     elif sys.stdin.isatty():
         # Interactive mode with no arguments - process current directory
         logger.info("Running in CLI mode (no args, processing current directory)")
-        results = process_file(".")
+        results = process_file(".", pm)
         print(json.dumps(results, indent=2))
     else:
         # Hook mode - read JSON from stdin
         logger.info("Running in hook mode (Claude Code PostToolUse)")
         try:
             input_data = sys.stdin.read()
-            logger.debug(
-                f"Received input: {input_data[:500]}..."
-            )  # Log first 500 chars
+            logger.debug(f"Received input: {input_data[:500]}...")  # Log first 500 chars
 
             if not input_data:
                 logger.warning("No input received from stdin")
@@ -192,7 +440,7 @@ def main():
 
                 if file_path:
                     logger.info(f"Processing {tool_name} operation on {file_path}")
-                    results = process_file(file_path)
+                    results = process_file(file_path, pm)
                 else:
                     logger.warning(f"No file_path found in {tool_name} input")
                     results = {"error": "No file_path found in tool input"}
@@ -210,21 +458,17 @@ def main():
                 # Build error message for Claude
                 error_messages = []
 
-                # Add type checking errors
+                # Add type checking errors (only if not skipped)
                 ty_results = results.get("ty", {})
-                if ty_results.get("exit_code", 0) != 0:
-                    error_messages.append(
-                        f"Type checking found {ty_results.get('error_count', 0)} errors:"
-                    )
+                if not ty_results.get("skipped", False) and ty_results.get("exit_code", 0) != 0:
+                    error_messages.append(f"Type checking found {ty_results.get('error_count', 0)} errors:")
                     if ty_results.get("output"):
                         error_messages.append(ty_results["output"])
 
                 # Add ruff errors
                 ruff_final = results.get("ruff_final", [])
                 if ruff_final:
-                    error_messages.append(
-                        f"\nRuff found {len(ruff_final)} linting issues:"
-                    )
+                    error_messages.append(f"\nRuff found {len(ruff_final)} linting issues:")
                     for issue in ruff_final[:10]:  # Show first 10 issues
                         location = issue.get("location", {})
                         error_messages.append(
