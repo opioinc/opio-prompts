@@ -20,6 +20,8 @@ from agent_setup import (
     create_symlinks,
     ensure_templates_exist,
     generate_local_templates,
+    install_commands,
+    uninstall_commands,
     uninstall_symlinks,
     validate_source_files,
     validate_systems,
@@ -248,11 +250,15 @@ def main(
         # Remove agent system symlinks
         single_system = system[0] if system else None
         uninstall_symlinks(target_dir, single_system)
-        
-        # Also remove language prompts if no specific system was specified
+
+        # Also remove language prompts and commands if no specific system was specified
         if not single_system:
             uninstall_language_prompts(target_dir)
-        
+            uninstall_commands(target_dir)
+        elif single_system == "Claude Code":
+            # If specifically uninstalling Claude Code, also remove its commands
+            uninstall_commands(target_dir)
+
         return
 
     # Get agentic systems
@@ -289,6 +295,12 @@ def main(
 
     # Create symlinks
     created_count = create_symlinks(target_dir, system)
+
+    # Install slash commands for Claude Code
+    if "Claude Code" in system:
+        cmd_results = install_commands(target_dir)
+        if cmd_results["commands_installed"]:
+            rprint(f"[blue]✨ Installed {cmd_results['commands_count']} slash command(s)[/blue]")
 
     if created_count > 0:
         rprint(f"\n[blue]Successfully created {created_count} symlink(s)[/blue]")

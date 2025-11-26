@@ -17,6 +17,7 @@ AGENTIC_SYSTEMS = {
         "source": "generated/cursor-agent.mdc",
     },
     "Cline": {"path": "AGENT.md", "source": "AGENT.md"},
+    "Codex": {"path": "AGENTS.md", "source": "AGENT.md"},
 }
 
 
@@ -212,3 +213,107 @@ def validate_source_files() -> None:
     if not source_agent_md.exists():
         rprint(f"[red]Error: Source AGENT.md not found at {source_agent_md}[/red]")
         raise FileNotFoundError(f"Source AGENT.md not found: {source_agent_md}")
+
+
+def get_commands_dir() -> Path:
+    """Get the path to the commands directory in the repo"""
+    return get_repo_root() / "commands" / "claude"
+
+
+def install_commands(target_dir: Path) -> Dict[str, bool]:
+    """Install slash commands to target project's .claude/commands/ directory.
+
+    Returns a dict with installation results.
+    """
+    results = {
+        "commands_installed": False,
+        "commands_count": 0,
+    }
+
+    repo_commands_dir = get_commands_dir()
+    if not repo_commands_dir.exists():
+        rprint("[yellow]No commands directory found in repo[/yellow]")
+        return results
+
+    # Get all .md files in the commands directory
+    command_files = list(repo_commands_dir.glob("*.md"))
+    if not command_files:
+        rprint("[yellow]No command files found[/yellow]")
+        return results
+
+    # Create target commands directory
+    target_commands_dir = target_dir / ".claude" / "commands"
+    target_commands_dir.mkdir(parents=True, exist_ok=True)
+
+    installed_count = 0
+    for cmd_file in command_files:
+        target_path = target_commands_dir / cmd_file.name
+
+        try:
+            if target_path.exists() or target_path.is_symlink():
+                # Check if it's our symlink
+                if target_path.is_symlink() and target_path.readlink() == cmd_file:
+                    rprint(f"[yellow]Command {cmd_file.name} already installed[/yellow]")
+                    continue
+
+                # File exists but isn't our symlink - ask to overwrite
+                overwrite = Confirm.ask(f"Command {cmd_file.name} already exists. Overwrite?")
+                if not overwrite:
+                    rprint(f"[yellow]Skipping {cmd_file.name}[/yellow]")
+                    continue
+                target_path.unlink()
+
+            target_path.symlink_to(cmd_file)
+            rprint(f"[green]✅ Installed command: /{cmd_file.stem}[/green]")
+            installed_count += 1
+
+        except OSError as e:
+            rprint(f"[red]Error installing command {cmd_file.name}: {e}[/red]")
+
+    results["commands_installed"] = installed_count > 0
+    results["commands_count"] = installed_count
+    return results
+
+
+def uninstall_commands(target_dir: Path) -> None:
+    """Remove slash commands from target project's .claude/commands/ directory."""
+    repo_commands_dir = get_commands_dir()
+    target_commands_dir = target_dir / ".claude" / "commands"
+
+    if not target_commands_dir.exists():
+        return
+
+    if not repo_commands_dir.exists():
+        return
+
+    # Get command files from repo to know which ones are ours
+    command_files = list(repo_commands_dir.glob("*.md"))
+    removed_count = 0
+
+    for cmd_file in command_files:
+        target_path = target_commands_dir / cmd_file.name
+
+        if target_path.is_symlink():
+            try:
+                if target_path.readlink() == cmd_file:
+                    target_path.unlink()
+                    rprint(f"[green]✅ Removed command: /{cmd_file.stem}[/green]")
+                    removed_count += 1
+            except OSError as e:
+                rprint(f"[red]Error removing command {cmd_file.name}: {e}[/red]")
+
+    # Clean up empty directories
+    try:
+        if target_commands_dir.exists() and not any(target_commands_dir.iterdir()):
+            target_commands_dir.rmdir()
+            rprint(f"[blue]Removed empty directory: {target_commands_dir}[/blue]")
+
+        claude_dir = target_commands_dir.parent
+        if claude_dir.exists() and claude_dir.name == ".claude" and not any(claude_dir.iterdir()):
+            claude_dir.rmdir()
+            rprint(f"[blue]Removed empty directory: {claude_dir}[/blue]")
+    except OSError:
+        pass
+
+    if removed_count > 0:
+        rprint(f"[green]Removed {removed_count} command(s)[/green]")

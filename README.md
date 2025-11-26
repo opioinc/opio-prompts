@@ -9,6 +9,7 @@ Agent configuration files and setup utilities for agentic development systems.
 - [Command Line Options](#command-line-options) - All available CLI flags
 - [Language Prompts](#language-prompts) - Add language-specific instructions
 - [Hooks](#hooks-code-quality-automation) - Automatic code quality checks
+- [Slash Commands](#slash-commands) - Auto-installed Claude Code commands
 - [Package Prompts](#package-prompts) - Framework/library specific prompts
 - [Examples](#examples) - Common usage patterns
 
@@ -127,38 +128,42 @@ uv run scripts/setup.py ~/my-project -u -s "Cursor"
 - **Amp** → Creates `AGENT.md` (symlink to `AGENT.md`)
 - **Cursor** → Creates `.cursor/rules/agent.mdc` (symlink to generated `.mdc` template)
 - **Cline** → Creates `AGENT.md` (symlink to `AGENT.md`)
+- **Codex** → Creates `AGENTS.md` (symlink to `AGENT.md`)
 
 ## Feature Support Matrix
 
 This table shows which features are currently supported for each AI agent system:
 
-| Feature | Claude Code | Cursor | Amp | Cline | Notes |
-|---------|:-----------:|:------:|:---:|:-----:|-------|
+| Feature | Claude Code | Cursor | Amp | Cline | Codex | Notes |
+|---------|:-----------:|:------:|:---:|:-----:|:-----:|-------|
 | **Core Prompts** |
-| AGENT.md symlink | ✅ | ✅ | ✅ | ✅ | Base agent configuration |
-| Custom file path | ✅ | ✅ | ❌ | ❌ | Claude: CLAUDE.md, Cursor: .cursor/rules/agent.mdc |
-| Auto-propagate updates | ✅ | ⚠️ | ✅ | ✅ | Cursor requires `--regenerate` for .mdc format |
+| AGENT.md symlink | ✅ | ✅ | ✅ | ✅ | ✅ | Base agent configuration |
+| Custom file path | ✅ | ✅ | ❌ | ❌ | ✅ | Claude: CLAUDE.md, Cursor: .cursor/rules/agent.mdc, Codex: AGENTS.md |
+| Auto-propagate updates | ✅ | ⚠️ | ✅ | ✅ | ✅ | Cursor requires `--regenerate` for .mdc format |
 | **Language Support** |
-| Language prompts | ✅ | ✅ | ✅ | ✅ | All agents can use language prompts |
-| Python prompts | ✅ | ✅ | ✅ | ✅ | Via @prompts/python/ references |
-| TypeScript prompts | ✅ | ✅ | ✅ | ✅ | Via @prompts/typescript/ references |
-| Rust prompts | ✅ | ✅ | ✅ | ✅ | Via @prompts/rust/ references |
+| Language prompts | ✅ | ✅ | ✅ | ✅ | ✅ | All agents can use language prompts |
+| Python prompts | ✅ | ✅ | ✅ | ✅ | ✅ | Via @prompts/python/ references |
+| TypeScript prompts | ✅ | ✅ | ✅ | ✅ | ✅ | Via @prompts/typescript/ references |
+| Rust prompts | ✅ | ✅ | ✅ | ✅ | ✅ | Via @prompts/rust/ references |
+| **Slash Commands** |
+| Command support | ✅ | ❌ | ❌ | ❌ | ❌ | Claude Code only |
+| /read_project_files | ✅ | ❌ | ❌ | ❌ | ❌ | Auto-installed with Claude Code |
 | **Hooks (Auto Quality Checks)** |
-| Hook support | ✅ | 🚧 | 🚧 | 🚧 | Currently Claude Code only |
-| Python hooks | ✅ | ❌ | ❌ | ❌ | Ruff + Ty type checking |
-| TypeScript hooks | ✅ | ❌ | ❌ | ❌ | TSX/TS-Node linting |
-| Auto-install hooks | ✅ | ❌ | ❌ | ❌ | With --add-language |
-| Settings integration | ✅ | ❌ | ❌ | ❌ | .claude/settings.json |
+| Hook support | ✅ | 🚧 | 🚧 | 🚧 | 🚧 | Currently Claude Code only, Codex has notify config |
+| Python hooks | ✅ | ❌ | ❌ | ❌ | ❌ | Ruff + Ty type checking |
+| TypeScript hooks | ✅ | ❌ | ❌ | ❌ | ❌ | TSX/TS-Node linting |
+| Auto-install hooks | ✅ | ❌ | ❌ | ❌ | ❌ | With --add-language |
+| Settings integration | ✅ | ❌ | ❌ | ❌ | ⚠️ | .claude/settings.json, Codex uses config.toml |
 | **Package Support** |
-| Package prompts | ✅ | ✅ | ✅ | ✅ | Framework/library specific prompts |
-| FastAPI prompts | ✅ | ✅ | ✅ | ✅ | Via @prompts/fastapi/ |
-| Svelte prompts | ✅ | ✅ | ✅ | ✅ | Via @prompts/svelte/ |
-| project.md updates | ✅ | ✅ | ✅ | ✅ | Auto-adds package references |
+| Package prompts | ✅ | ✅ | ✅ | ✅ | ✅ | Framework/library specific prompts |
+| FastAPI prompts | ✅ | ✅ | ✅ | ✅ | ✅ | Via @prompts/fastapi/ |
+| Svelte prompts | ✅ | ✅ | ✅ | ✅ | ✅ | Via @prompts/svelte/ |
+| project.md updates | ✅ | ✅ | ✅ | ✅ | ✅ | Auto-adds package references |
 | **Management** |
-| Interactive setup | ✅ | ✅ | ✅ | ✅ | Via setup.py script |
-| Multi-agent install | ✅ | ✅ | ✅ | ✅ | Can install multiple agents at once |
-| Uninstall support | ✅ | ✅ | ✅ | ✅ | Clean removal of symlinks |
-| Selective uninstall | ✅ | ✅ | ✅ | ✅ | Remove specific languages/packages |
+| Interactive setup | ✅ | ✅ | ✅ | ✅ | ✅ | Via setup.py script |
+| Multi-agent install | ✅ | ✅ | ✅ | ✅ | ✅ | Can install multiple agents at once |
+| Uninstall support | ✅ | ✅ | ✅ | ✅ | ✅ | Clean removal of symlinks |
+| Selective uninstall | ✅ | ✅ | ✅ | ✅ | ✅ | Remove specific languages/packages |
 
 ### Legend
 
@@ -168,12 +173,21 @@ This table shows which features are currently supported for each AI agent system
 - ❌ **Not Supported** - Not available for this agent
 - N/A **Not Applicable** - Feature doesn't apply to this agent
 
+### Notes on Slash Commands
+
+Slash commands are automatically installed when you set up **Claude Code**. These provide quick shortcuts for common tasks:
+
+- `/read_project_files` - Reads project.md and all referenced files to establish project context and rules
+
+Commands are installed as symlinks to `.claude/commands/` in your project directory. Updates to the command definitions in this repo will automatically propagate to all linked projects.
+
 ### Notes on Hook Support
 
 Currently, hooks are only implemented for **Claude Code**. The architecture supports adding hooks for other agents:
 - **Cursor**: Would use `.cursor/hooks/` directory and cursor-specific settings
 - **Amp**: Would require understanding Amp's extension/hook system
 - **Cline**: Would need integration with Cline's workflow system
+- **Codex**: Has built-in notify configuration for event notifications but doesn't support file-save hooks yet
 
 To request hook support for additional agents, please open an issue on GitHub.
 
@@ -285,6 +299,31 @@ your_project/
 - One of: `tsx`, `ts-node`, or `tsc`
 
 If dependencies are missing, the installation will fail with a clear error message.
+
+### Slash Commands
+
+When you install Claude Code, slash commands are automatically installed to `.claude/commands/` in your project. These commands provide quick shortcuts for common workflows.
+
+#### Available Commands
+
+| Command | Description |
+|---------|-------------|
+| `/read_project_files` | Reads project.md and all referenced files to establish project context |
+
+#### How Commands Work
+
+Commands are installed as symlinks, so updates to this repo automatically propagate to your project. The commands are stored in your project's `.claude/commands/` directory.
+
+#### Project Structure After Command Installation
+
+```
+your_project/
+├── .claude/
+│   ├── commands/
+│   │   └── read_project_files.md  # Symlink to repo command
+│   └── settings.json              # Hook configuration (if hooks installed)
+└── ...
+```
 
 ### Package Prompts
 
